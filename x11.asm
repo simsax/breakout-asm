@@ -28,7 +28,7 @@ static x11_connect_to_server:function
     ; Set sockaddr_un.sun_family to AF_UNIX
     ; Fill sockaddr_un.sun_path with: "/tmp/.X11-unix/X0"
     mov word [rsp], AF_UNIX
-    lea rsi, sun_path ; try MOV
+    lea rsi, sun_path
     mov r12, rdi
     lea rdi, [rsp + 2]
     cld ; ensure the copy is done forwards
@@ -173,13 +173,21 @@ static x11_open_font:function
     push rbp
     mov rbp, rsp
 
+    ; lenght of the font name
     %define OPEN_FONT_NAME_BYTE_COUNT 5
+    ; number of bytes to align the fontname to 4 byte boundary
     %define OPEN_FONT_PADDING ((4 - (OPEN_FONT_NAME_BYTE_COUNT % 4)) % 4)
+    ; total number of 32-bit words (3 words are the header, the rest of the words are the font name)
     %define OPEN_FONT_PACKET_U32_COUNT (3 + (OPEN_FONT_NAME_BYTE_COUNT + OPEN_FONT_PADDING) / 4)
+    ; opcode for OpenFont function
     %define X11_OP_REQ_OPEN_FONT 0x2d
 
     sub rsp, 6*8
-    mov dword [rsp + 0*4], X11_OP_REQ_OPEN_FONT | (OPEN_FONT_NAME_BYTE_COUNT << 16)
+
+    ; Request format
+    ; every request contains an 8-bit major opcode and a 16-bit length field expressed in units of four bytes
+    ; here using OPEN_FONT_NAME_BYTE_COUNT or OPEN_FONT_PACKET_U32_COUNT is the same since they are both 5
+    mov dword [rsp + 0*4], X11_OP_REQ_OPEN_FONT | (OPEN_FONT_PACKET_U32_COUNT << 16)
     mov dword [rsp + 1*4], esi
     mov dword [rsp + 2*4], OPEN_FONT_NAME_BYTE_COUNT
     mov byte [rsp + 3*4 + 0], 'f'
@@ -394,71 +402,99 @@ static x11_read_reply:function
 ; @param edx The gc id.
 poll_messages:
 static poll_messages:function
-  push rbp
-  mov rbp, rsp
+    push rbp
+    mov rbp, rsp
 
-  sub rsp, 32
+    sub rsp, 32
 
-  %define POLLIN 0x001
-  %define POLLPRI 0x002
-  %define POLLOUT 0x004
-  %define POLLERR  0x008
-  %define POLLHUP  0x010
-  %define POLLNVAL 0x020
+    %define POLLIN 0x001
+    %define POLLPRI 0x002
+    %define POLLOUT 0x004
+    %define POLLERR  0x008
+    %define POLLHUP  0x010
+    %define POLLNVAL 0x020
 
-  mov DWORD [rsp + 0*4], edi
-  mov DWORD [rsp + 1*4], POLLIN
+    mov dword [rsp + 0*4], edi
+    mov dword [rsp + 1*4], POLLIN
+    mov dword [rsp + 16], esi ; window id
+    mov dword [rsp + 20], edx ; gc id
 
-  mov dword [rsp + 16], esi ; window id
-  mov dword [rsp + 20], edx ; gc id
+    .loop:
+        mov rax, SYS_POLL
+        lea rdi, [rsp]
+        mov rsi, 1
+        mov rdx, -1
+        syscall
 
-  .loop:
-    mov rax, SYS_POLL
-    lea rdi, [rsp]
-    mov rsi, 1
-    mov rdx, -1
-    syscall
+        cmp rax, 0
+        jle die
 
-    cmp rax, 0
-    jle die
+        cmp dword [rsp + 2*4], POLLERR  
+        je die
 
-    cmp DWORD [rsp + 2*4], POLLERR  
-    je die
+        cmp dword [rsp + 2*4], POLLHUP  
+        je die
 
-    cmp DWORD [rsp + 2*4], POLLHUP  
-    je die
+        mov rdi, [rsp + 0*4]
+        call x11_read_reply
 
-    mov rdi, [rsp + 0*4]
-    call x11_read_reply
+        %define X11_EVENT_EXPOSURE 0xc
+        cmp eax, X11_EVENT_EXPOSURE
+        jnz .received_other_event
 
-    %define X11_EVENT_EXPOSURE 0xc
-    cmp eax, X11_EVENT_EXPOSURE
-    jnz .received_other_event
+        .received_exposed_event:
+        mov byte [rsp + 24], 1 ; Mark as exposed.
 
-    .received_exposed_event:
-    mov BYTE [rsp + 24], 1 ; Mark as exposed.
+        .received_other_event:
 
-    .received_other_event:
+        cmp byte [rsp + 24], 1 ; exposed?
+        jnz .loop
 
-    cmp BYTE [rsp + 24], 1 ; exposed?
-    jnz .loop
+        ;.draw_text:
+        ;    mov rdi, [rsp + 0*4] ; socket fd
+        ;    lea rsi, [hello_world] ; string
+        ;    mov edx, 13 ; length
+        ;    mov ecx, [rsp + 16] ; window id
+        ;    mov r8d, [rsp + 20] ; gc id
+        ;    mov r9d, 300 ; x
+        ;    shl r9d, 16
+        ;    or r9d, 400 ; y
+        ;    call x11_draw_text
 
-    .draw_text:
-      mov rdi, [rsp + 0*4] ; socket fd
-      lea rsi, [hello_world] ; string
-      mov edx, 13 ; length
-      mov ecx, [rsp + 16] ; window id
-      mov r8d, [rsp + 20] ; gc id
-      mov r9d, 100 ; x
-      shl r9d, 16
-      or r9d, 100 ; y
-      call x11_draw_text
+        .draw_image:
+            mov rdi, [rsp] ; socket fd
+            mov rsi, [rsp + 16] ; window id
+            mov edx, [rsp + 20] ; gc id
+            lea rcx, [image]
+            mov r8d, WINDOW_W
+            shl r8d, 16
+            or r8d, WINDOW_H
+            mov r9d, 0 ; x
+            shl r9d, 16
+            or r9d, 0 ; y
+            call x11_put_image
 
-    jmp .loop
+        jmp .loop
 
-  add rsp, 32
-  pop rbp
-  ret
+    add rsp, 32
+    pop rbp
+    ret
+
+; calculates padding required to 4-byte align the data
+; @param rdi: the data length
+; @returns eax: padding
+calc_padding:
+static calc_padding:function
+    ; Compute padding with division and modulo 4.
+    mov eax, edi ; Put dividend in eax.
+    mov ecx, 4 ; Put divisor in ecx.
+    cdq ; Sign extend eax (produce a quadword dividend from a doubleword before doubleword division)
+    idiv ecx ; Compute eax / ecx, and put the remainder (i.e. modulo) in edx.
+    ; LLVM optimizer magic: `(4-x)%4 == -x & 3`, for some reason.
+    neg edx
+    and edx, 3
+    mov eax, edx
+    ret
 
 ; Draw text in a X11 window with server-side text rendering.
 ; @param rdi The socket file descriptor.
@@ -469,62 +505,131 @@ static poll_messages:function
 ; @param r9d Packed x and y.
 x11_draw_text:
 static x11_draw_text:function
-  push rbp
-  mov rbp, rsp
+    push rbp
+    mov rbp, rsp
 
-  sub rsp, 1024
+    sub rsp, 1024
 
-  mov dword [rsp + 1*4], ecx ; Store the window id directly in the packet data on the stack.
-  mov dword [rsp + 2*4], r8d ; Store the gc id directly in the packet data on the stack.
-  mov dword [rsp + 3*4], r9d ; Store x, y directly in the packet data on the stack.
+    mov dword [rsp + 1*4], ecx ; Store the window id directly in the packet data on the stack.
+    mov dword [rsp + 2*4], r8d ; Store the gc id directly in the packet data on the stack.
+    mov dword [rsp + 3*4], r9d ; Store x, y directly in the packet data on the stack.
 
-  mov r8d, edx ; Store the string length in r8 since edx will be overwritten next.
-  mov qword [rsp + 1024 - 8], rdi ; Store the socket file descriptor on the stack to free the register.
+    mov qword [rsp + 1024 - 8], rdi ; Store the socket file descriptor on the stack to free the register.
 
-  ; Compute padding and packet u32 count with division and modulo 4.
-  mov eax, edx ; Put dividend in eax.
-  mov ecx, 4 ; Put divisor in ecx.
-  cdq ; Sign extend.
-  idiv ecx ; Compute eax / ecx, and put the remainder (i.e. modulo) in edx.
-  ; LLVM optimizer magic: `(4-x)%4 == -x & 3`, for some reason.
-  neg edx
-  and edx, 3
-  mov r9d, edx ; Store padding in r9.
+    ; length is in edx
+    mov r8d, edx ; Store the string length in r8 since edx will be overwritten next.
+    mov edi, edx
+    call calc_padding
+    mov r9d, eax ; p
+    mov eax, r8d ; n
+    add eax, r9d ; n + p
+    shr eax, 2 ; (n + p) / 4
+    add eax, 4 ; 4 + (n + p) / 4
 
-  mov eax, r8d 
-  add eax, r9d
-  shr eax, 2 ; Compute: eax /= 4
-  add eax, 4 ; eax now contains the packet u32 count.
+    %define X11_OP_REQ_IMAGE_TEXT8 0x4c
+    mov dword [rsp + 0*4], r8d
+    shl dword [rsp + 0*4], 8
+    or dword [rsp + 0*4], X11_OP_REQ_IMAGE_TEXT8
+    mov ecx, eax
+    shl ecx, 16
+    or [rsp + 0*4], ecx
+
+    ; Copy the text string into the packet data on the stack.
+    mov rsi, rsi ; Source string in rsi.
+    lea rdi, [rsp + 4*4] ; Destination
+    cld ; Move forward
+    mov ecx, r8d ; String length.
+    rep movsb ; Copy.
+
+    mov rdx, rax ; packet u32 count
+    imul rdx, 4
+    mov rax, SYS_WRITE
+    mov rdi, qword [rsp + 1024 - 8] ; fd
+    lea rsi, [rsp]
+    syscall
+
+    cmp rax, rdx
+    jnz die
+
+    add rsp, 1024
+
+    pop rbp
+    ret
+
+; my code below
+
+; Put image in a X11 window
+; @param rdi The socket file descriptor
+; @param esi The window id
+; @param edx The gc id
+; @param rcx The image data
+; @param r8d packed width, height
+; @param r9d Packed x and y
+x11_put_image:
+static x11_put_image:function
+    push rbp
+    mov rbp, rsp
+
+    sub rsp, 1024
+
+    mov dword [rsp + 1*4], esi ; drawable
+    mov dword [rsp + 2*4], edx ; gcontext
+    mov dword [rsp + 3*4], r8d ; width, height
+    mov dword [rsp + 4*4], r9d ; x, y
+    mov dword [rsp + 4*5], 24 ; depth
+    shl dword [rsp + 4*5], 8 ; left-pad is zero
 
 
-  %define X11_OP_REQ_IMAGE_TEXT8 0x4c
-  mov dword [rsp + 0*4], r8d
-  shl dword [rsp + 0*4], 8
-  or dword [rsp + 0*4], X11_OP_REQ_IMAGE_TEXT8
-  mov ecx, eax
-  shl ecx, 16
-  or [rsp + 0*4], ecx
+    %define X11_OP_PUT_IMAGE 0x48
+    %define FORMAT 0x2 ; ZPixmap
+    mov dword [rsp + 0*4], X11_OP_PUT_IMAGE | (FORMAT << 8)
 
-  ; Copy the text string into the packet data on the stack.
-  mov rsi, rsi ; Source string in rsi.
-  lea rdi, [rsp + 4*4] ; Destination
-  cld ; Move forward
-  mov ecx, r8d ; String length.
-  rep movsb ; Copy.
+    mov qword [rsp + 1024 - 8], rdi ; Store the socket file descriptor on the stack to free the register.
 
-  mov rdx, rax ; packet u32 count
-  imul rdx, 4
-  mov rax, SYS_WRITE
-  mov rdi, qword [rsp + 1024 - 8] ; fd
-  lea rsi, [rsp]
-  syscall
+    mov eax, r8d
+    and eax, 0xFFFF
+    shr r8d, 16
+    mul r8d
+    imul rax, 3
 
-  cmp rax, rdx
-  jnz die
+    ; eax should have the length now
+    mov edi, eax
+    mov r8d, eax
+    call calc_padding
+    mov r9d, eax ; p
+    mov eax, r8d ; n
+    add eax, r9d ; n + p
+    shr eax, 2 ; (n + p) / 4
+    add eax, 6 ; 6 + (n + p) / 4
 
-  add rsp, 1024
+    shl eax, 16
+    or [rsp + 0*4], eax
 
-  pop rbp
-  ret
+    mov r8d, eax ; packet count
+
+    ; write header first
+    mov rdx, 24
+    mov rdi, qword [rsp + 1024 - 8] ; fd
+    mov rax, SYS_WRITE
+    lea rsi, [rsp]
+    syscall
+
+    cmp rax, rdx
+    jnz die
+
+    ; now write image data
+    mov rdx, r8
+    imul rdx, 4
+    mov rax, SYS_WRITE
+    mov rdi, qword [rsp + 1024 - 8] ; fd
+    mov rsi, rcx
+    syscall
+
+    cmp rax, rdx
+    jnz die
+
+    add rsp, 1024
+    pop rbp
+    ret
 
 %endif
