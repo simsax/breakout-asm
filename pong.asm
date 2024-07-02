@@ -1,6 +1,7 @@
 %define WINDOW_W 800
 %define WINDOW_H 600
 %define IMAGE_SIZE (WINDOW_W * WINDOW_H * 3) ; 24-bit pixels
+%define TINY_IMAGE_SIZE (10 * 10 * 3) ; 24-bit pixels
 
 %include "common.asm"
 %include "x11.asm"
@@ -32,6 +33,7 @@ print:
     syscall
     ret
 
+; @param rdi: pointer to message
 println:
     ; void println(char* msg);
     call print
@@ -40,7 +42,7 @@ println:
     ret
 
 ; @param rdi: pointer to data
-; @param si: filler byte
+; @param sil: filler byte
 ; @param rdx: length of data
 memset:
     mov al, sil
@@ -63,12 +65,13 @@ color_image:
 
     xor rcx, rcx ; counter
 .loop:
+    cmp rcx, rdx
+    jz .done
+
     mov byte [rdi + 0 + rcx], r8b
     mov byte [rdi + 1 + rcx], r9b
     mov byte [rdi + 2 + rcx], r10b
 
-    cmp rcx, rdx
-    jz .done
     add rcx, 3
     jmp .loop
 
@@ -78,8 +81,14 @@ color_image:
 _start:
     ; initialize image data
     lea rdi, [image]
-    mov esi, 0x0000FF00 ; green
     mov rdx, IMAGE_SIZE
+    mov esi, 0x0000FF00 ; green
+    call color_image
+
+    ; initialize image data
+    lea rdi, [tiny_image]
+    mov rdx, TINY_IMAGE_SIZE
+    mov esi, 0x0000FF00 ; green
     call color_image
 
     call x11_connect_to_server
@@ -141,7 +150,7 @@ static newline:data
 sun_path: db "/tmp/.X11-unix/X0", 0
 static sun_path:data
 
-hello_world: db "Hello, world!"
+hello_world: db "Hello, world!", 0
 static hello_world:data
 
 section .data
@@ -162,6 +171,7 @@ section .bss
 
 image:
     resb IMAGE_SIZE
-image_end:
 
+tiny_image:
+    resb TINY_IMAGE_SIZE
 

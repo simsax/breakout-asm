@@ -53,6 +53,10 @@ static x11_connect_to_server:function
     ret
 
 die:
+die_poll:
+die_pollerr:
+die_pollhup:
+die_reply:
     mov rax, SYS_EXIT
     mov rdi, 1
     syscall
@@ -264,137 +268,137 @@ static x11_create_gc:function
 ; @param r9d Packed w and h.
 x11_create_window:
 static x11_create_window:function
-  push rbp
-  mov rbp, rsp
+    push rbp
+    mov rbp, rsp
 
-  %define X11_OP_REQ_CREATE_WINDOW 0x01
-  %define X11_FLAG_WIN_BG_COLOR 0x00000002
-  %define X11_EVENT_FLAG_KEY_RELEASE 0x0002
-  %define X11_EVENT_FLAG_EXPOSURE 0x8000
-  %define X11_FLAG_WIN_EVENT 0x00000800
-  
-  %define CREATE_WINDOW_FLAG_COUNT 2
-  %define CREATE_WINDOW_PACKET_U32_COUNT (8 + CREATE_WINDOW_FLAG_COUNT)
-  %define CREATE_WINDOW_BORDER 1
-  %define CREATE_WINDOW_GROUP 1
+    %define X11_OP_REQ_CREATE_WINDOW 0x01
+    %define X11_FLAG_WIN_BG_COLOR 0x00000002
+    %define X11_EVENT_FLAG_KEY_RELEASE 0x0002
+    %define X11_EVENT_FLAG_EXPOSURE 0x8000
+    %define X11_FLAG_WIN_EVENT 0x00000800
+    
+    %define CREATE_WINDOW_FLAG_COUNT 2
+    %define CREATE_WINDOW_PACKET_U32_COUNT (8 + CREATE_WINDOW_FLAG_COUNT)
+    %define CREATE_WINDOW_BORDER 1
+    %define CREATE_WINDOW_GROUP 1
 
-  sub rsp, 12*8
+    sub rsp, 12*8
 
-  mov dword [rsp + 0*4], X11_OP_REQ_CREATE_WINDOW | (CREATE_WINDOW_PACKET_U32_COUNT << 16)
-  mov dword [rsp + 1*4], esi
-  mov dword [rsp + 2*4], edx
-  mov dword [rsp + 3*4], r8d
-  mov dword [rsp + 4*4], r9d
-  mov dword [rsp + 5*4], CREATE_WINDOW_GROUP | (CREATE_WINDOW_BORDER << 16)
-  mov dword [rsp + 6*4], ecx
-  mov dword [rsp + 7*4], X11_FLAG_WIN_BG_COLOR | X11_FLAG_WIN_EVENT
-  mov dword [rsp + 8*4], 0
-  mov dword [rsp + 9*4], X11_EVENT_FLAG_KEY_RELEASE | X11_EVENT_FLAG_EXPOSURE
+    mov dword [rsp + 0*4], X11_OP_REQ_CREATE_WINDOW | (CREATE_WINDOW_PACKET_U32_COUNT << 16)
+    mov dword [rsp + 1*4], esi
+    mov dword [rsp + 2*4], edx
+    mov dword [rsp + 3*4], r8d
+    mov dword [rsp + 4*4], r9d
+    mov dword [rsp + 5*4], CREATE_WINDOW_GROUP | (CREATE_WINDOW_BORDER << 16)
+    mov dword [rsp + 6*4], ecx
+    mov dword [rsp + 7*4], X11_FLAG_WIN_BG_COLOR | X11_FLAG_WIN_EVENT
+    mov dword [rsp + 8*4], 0
+    mov dword [rsp + 9*4], X11_EVENT_FLAG_KEY_RELEASE | X11_EVENT_FLAG_EXPOSURE
 
 
-  mov rax, SYS_WRITE
-  mov rdi, rdi
-  lea rsi, [rsp]
-  mov rdx, CREATE_WINDOW_PACKET_U32_COUNT*4
-  syscall
+    mov rax, SYS_WRITE
+    mov rdi, rdi
+    lea rsi, [rsp]
+    mov rdx, CREATE_WINDOW_PACKET_U32_COUNT*4
+    syscall
 
-  cmp rax, CREATE_WINDOW_PACKET_U32_COUNT*4
-  jnz die
+    cmp rax, CREATE_WINDOW_PACKET_U32_COUNT*4
+    jnz die
 
-  add rsp, 12*8
+    add rsp, 12*8
 
-  pop rbp
-  ret
+    pop rbp
+    ret
 
 ; Map a X11 window.
 ; @param rdi The socket file descriptor.
 ; @param esi The window id.
 x11_map_window:
 static x11_map_window:function
-  push rbp
-  mov rbp, rsp
+    push rbp
+    mov rbp, rsp
 
-  sub rsp, 16
+    sub rsp, 16
 
-  %define X11_OP_REQ_MAP_WINDOW 0x08
-  mov dword [rsp + 0*4], X11_OP_REQ_MAP_WINDOW | (2<<16)
-  mov dword [rsp + 1*4], esi
+    %define X11_OP_REQ_MAP_WINDOW 0x08
+    mov dword [rsp + 0*4], X11_OP_REQ_MAP_WINDOW | (2<<16)
+    mov dword [rsp + 1*4], esi
 
-  mov rax, SYS_WRITE
-  mov rdi, rdi
-  lea rsi, [rsp]
-  mov rdx, 2*4
-  syscall
+    mov rax, SYS_WRITE
+    mov rdi, rdi
+    lea rsi, [rsp]
+    mov rdx, 2*4
+    syscall
 
-  cmp rax, 2*4
-  jnz die
+    cmp rax, 2*4
+    jnz die
 
-  add rsp, 16
+    add rsp, 16
 
-  pop rbp
-  ret
+    pop rbp
+    ret
 
 ; Set a file descriptor in non-blocking mode.
 ; @param rdi The file descriptor.
 set_fd_non_blocking:
 static set_fd_non_blocking:function
-  push rbp
-  mov rbp, rsp
+    push rbp
+    mov rbp, rsp
 
-  %define F_GETFL 3
-  %define F_SETFL 4
+    %define F_GETFL 3
+    %define F_SETFL 4
 
-  %define O_NONBLOCK 2048
+    %define O_NONBLOCK 2048
 
-  mov rax, SYS_FCNTL
-  mov rdi, rdi 
-  mov rsi, F_GETFL
-  mov rdx, 0
-  syscall
+    mov rax, SYS_FCNTL
+    mov rdi, rdi 
+    mov rsi, F_GETFL
+    mov rdx, 0
+    syscall
 
-  cmp rax, 0
-  jl die
+    cmp rax, 0
+    jl die
 
-  ; `or` the current file status flag with O_NONBLOCK.
-  mov rdx, rax
-  or rdx, O_NONBLOCK
+    ; `or` the current file status flag with O_NONBLOCK.
+    mov rdx, rax
+    or rdx, O_NONBLOCK
 
-  mov rax, SYS_FCNTL
-  mov rdi, rdi 
-  mov rsi, F_SETFL
-  mov rdx, rdx
-  syscall
+    mov rax, SYS_FCNTL
+    mov rdi, rdi 
+    mov rsi, F_SETFL
+    mov rdx, rdx
+    syscall
 
-  cmp rax, 0
-  jl die
+    cmp rax, 0
+    jl die
 
-  pop rbp
-  ret
+    pop rbp
+    ret
 
 ; Read the X11 server reply.
 ; @return The message code in al.
 x11_read_reply:
 static x11_read_reply:function
-  push rbp
-  mov rbp, rsp
+    push rbp
+    mov rbp, rsp
 
-  sub rsp, 32
-  
-  mov rax, SYS_READ
-  mov rdi, rdi
-  lea rsi, [rsp]
-  mov rdx, 32
-  syscall
+    sub rsp, 32
+    
+    mov rax, SYS_READ
+    mov rdi, rdi
+    lea rsi, [rsp]
+    mov rdx, 32
+    syscall
 
-  cmp rax, 1
-  jle die
+    cmp rax, 1
+    jle die_reply
 
-  mov al, byte [rsp]
+    mov al, byte [rsp]
 
-  add rsp, 32
+    add rsp, 32
 
-  pop rbp
-  ret
+    pop rbp
+    ret
 
 ; Poll indefinitely messages from the X11 server with poll(2).
 ; @param rdi The socket file descriptor.
@@ -427,13 +431,13 @@ static poll_messages:function
         syscall
 
         cmp rax, 0
-        jle die
+        jle die_poll
 
         cmp dword [rsp + 2*4], POLLERR  
-        je die
+        je die_pollerr
 
         cmp dword [rsp + 2*4], POLLHUP  
-        je die
+        je die_pollhup
 
         mov rdi, [rsp + 0*4]
         call x11_read_reply
@@ -461,18 +465,31 @@ static poll_messages:function
         ;    or r9d, 400 ; y
         ;    call x11_draw_text
 
-        .draw_image:
-            mov rdi, [rsp] ; socket fd
+        ;.draw_image:
+        ;    mov rdi, [rsp] ; socket fd
+        ;    mov rsi, [rsp + 16] ; window id
+        ;    mov edx, [rsp + 20] ; gc id
+        ;    lea rcx, [image]
+        ;    mov r8d, WINDOW_W
+        ;    shl r8d, 16
+        ;    or r8d, WINDOW_H
+        ;    mov r9d, 0 ; x
+        ;    shl r9d, 16
+        ;    or r9d, 0 ; y
+        ;    call x11_put_image
+
+        .draw_image_stack:
+            mov rdi, [rsp + 0*4] ; socket fd
             mov rsi, [rsp + 16] ; window id
             mov edx, [rsp + 20] ; gc id
-            lea rcx, [image]
-            mov r8d, WINDOW_W
+            lea rcx, [tiny_image]
+            mov r8d, 10 ; width
             shl r8d, 16
-            or r8d, WINDOW_H
+            or r8d, 10 ; height
             mov r9d, 0 ; x
             shl r9d, 16
             or r9d, 0 ; y
-            call x11_put_image
+            call x11_put_image_stack
 
         jmp .loop
 
@@ -585,6 +602,7 @@ static x11_put_image:function
     mov dword [rsp + 0*4], X11_OP_PUT_IMAGE | (FORMAT << 8)
 
     mov qword [rsp + 1024 - 8], rdi ; Store the socket file descriptor on the stack to free the register.
+    mov qword [rsp + 1024 - 16], rcx ; Store the image data on the stack
 
     mov eax, r8d
     and eax, 0xFFFF
@@ -602,10 +620,9 @@ static x11_put_image:function
     shr eax, 2 ; (n + p) / 4
     add eax, 6 ; 6 + (n + p) / 4
 
+    mov r8d, eax ; packet count
     shl eax, 16
     or [rsp + 0*4], eax
-
-    mov r8d, eax ; packet count
 
     ; write header first
     mov rdx, 24
@@ -618,11 +635,98 @@ static x11_put_image:function
     jnz die
 
     ; now write image data
+    ; note: write() may transfer fewer than count bytes, so I call it in a loop
+    sub r8, 6 ; subtract header since it was sent before
+
     mov rdx, r8
     imul rdx, 4
-    mov rax, SYS_WRITE
+    ; now rdx has total number of bytes to write
+
+    ;; TODO: double check code below
     mov rdi, qword [rsp + 1024 - 8] ; fd
-    mov rsi, rcx
+    mov r10, qword [rsp + 1024 - 16] ; pointer to data
+.write:
+    mov rax, SYS_WRITE
+    mov rsi, r10
+    syscall
+
+    cmp rax, rdx
+    jz .done
+    add r10, rax ; increment pointer by number of bytes written
+    sub rdx, rax
+    jmp .write
+
+.done:
+    add rsp, 1024
+    pop rbp
+    ret
+
+; Put image in a X11 window
+; @param rdi The socket file descriptor
+; @param esi The window id
+; @param edx The gc id
+; @param rcx The image data
+; @param r8d packed width, height
+; @param r9d Packed x and y
+x11_put_image_stack:
+static x11_put_image_stack:function
+    push rbp
+    mov rbp, rsp
+
+    sub rsp, 1024
+
+    mov dword [rsp + 1*4], esi ; drawable
+    mov dword [rsp + 2*4], edx ; gcontext
+    mov dword [rsp + 3*4], r8d ; width, height
+    mov dword [rsp + 4*4], r9d ; x, y
+    mov dword [rsp + 4*5], 24 ; depth
+    shl dword [rsp + 4*5], 8 ; left-pad is zero
+
+
+    %define X11_OP_PUT_IMAGE 0x48
+    %define FORMAT 0x2 ; ZPixmap
+    mov dword [rsp + 0*4], X11_OP_PUT_IMAGE | (FORMAT << 8)
+
+    mov qword [rsp + 1024 - 8], rdi ; store the socket file descriptor on the stack to free the register.
+    mov qword [rsp + 1024 - 16], rcx ; store the image data on the stack
+
+    mov eax, r8d
+    and eax, 0xFFFF
+    shr r8d, 16
+    mul r8d
+    imul rax, 3
+
+    ; eax should have the length now
+    mov edi, eax
+    mov r8d, eax
+    call calc_padding
+    mov r9d, eax ; p
+    mov eax, r8d ; n
+    add eax, r9d ; n + p
+    shr eax, 2 ; (n + p) / 4
+    add eax, 6 ; 6 + (n + p) / 4
+
+    mov r8d, eax ; packet count
+    shl eax, 16
+    or [rsp + 0*4], eax
+
+    mov r10d, r8d
+    sub r10d, 6 ; remove header
+
+    ; copy the image data into the packet data on the stack
+    mov rsi, qword [rsp + 1024 - 16]
+    lea rdi, [rsp + 4*6] ; destination
+    cld ; move forward
+    mov ecx, r10d ; image length
+    rep movsb ; copy
+
+    ; write header first
+    mov rdx, r8
+    imul rdx, 4
+    ; rdx has total number of bytes to write
+    mov rdi, qword [rsp + 1024 - 8] ; fd
+    mov rax, SYS_WRITE
+    lea rsi, [rsp]
     syscall
 
     cmp rax, rdx
@@ -631,5 +735,7 @@ static x11_put_image:function
     add rsp, 1024
     pop rbp
     ret
+
+; try to change pixmap, use memset, check that stack actually contains correct image data etc
 
 %endif
