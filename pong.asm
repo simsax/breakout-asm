@@ -16,9 +16,9 @@
 ; graphics constants
 %define WINDOW_W 800
 %define WINDOW_H 600
-%define IMAGE_W 100
-%define IMAGE_H 100
-%define IMAGE_SIZE (IMAGE_W * IMAGE_H * 4) ; BGRX format
+%define BALL_W 100
+%define BALL_H 100
+%define BALL_SIZE (BALL_W * BALL_H * 4) ; BGRX format
 
 global _start
 section .text
@@ -419,7 +419,7 @@ static x11_read_reply:function
     pop rbp
     ret
 
-; Poll indefinitely messages from the X11 server with poll(2).
+; Poll indefinitely messages from the X11 server with poll(2)
 ; @param rdi The socket file descriptor.
 ; @param esi The window id.
 ; @param edx The gc id.
@@ -473,31 +473,20 @@ static poll_messages:function
         cmp byte [rsp + 24], 1 ; exposed?
         jnz .loop
 
-        ;.draw_text:
-        ;    mov rdi, [rsp + 0*4] ; socket fd
-        ;    lea rsi, [hello_world] ; string
-        ;    mov edx, 13 ; length
-        ;    mov ecx, [rsp + 16] ; window id
-        ;    mov r8d, [rsp + 20] ; gc id
-        ;    mov r9d, 300 ; x
-        ;    shl r9d, 16
-        ;    or r9d, 400 ; y
-        ;    call x11_draw_text
-
-        .draw_image:
+        .draw_ball:
             mov rdi, [rsp] ; socket fd
             mov rsi, [rsp + 16] ; window id
             mov edx, [rsp + 20] ; gc id
-            lea rcx, [image]
-            mov r8d, IMAGE_H
+            lea rcx, [ball]
+            mov r8d, BALL_H
             shl r8d, 16
-            or r8d, IMAGE_W
-            mov r9d, 100 ; x
+            or r8d, BALL_W
+            mov r9d, [ball_y]
             shl r9d, 16
-            or r9d, 100 ; y
-            ; pass image size on the stack (IMAGE_SIZE)
+            or r9d, [ball_x]
+            ; pass image size on the stack
             sub rsp, 16 ; maintain 16-byte alignment
-            mov qword [rsp], IMAGE_SIZE
+            mov qword [rsp], BALL_SIZE
             call x11_put_image
             add rsp, 16
 
@@ -584,7 +573,7 @@ static x11_draw_text:function
     ret
 
 
-; Put image in a X11 window
+; Put image in a X11 window (figured it out on my own)
 ; @param rdi The socket file descriptor
 ; @param esi The window id
 ; @param edx The gc id
@@ -645,7 +634,7 @@ static x11_put_image:function
 
     cmp rax, rdx
     jz .done
-    add r10, rax ; increment pointer by number of bytes written
+    add r10, rax ; increment pointer by number of bytes written (is this right?)
     sub rdx, rax
     jmp .write
 
@@ -655,6 +644,7 @@ static x11_put_image:function
     ret
 
 
+; @param rdi: pointer to string
 strlen:
     ; size_t strlen(const char* s);
     xor rax, rax
@@ -668,6 +658,7 @@ strlen:
 .done:
     ret
 
+; @param rdi: pointer to message
 print:
     ; void print(char* msg);
     push rdi ; message
@@ -707,8 +698,8 @@ color_image:
 
 _start:
     ; initialize image data
-    lea rdi, [image]
-    mov rdx, (IMAGE_SIZE / 4) ; rdx contains number of dwords
+    lea rdi, [ball]
+    mov rdx, (BALL_SIZE / 4) ; rdx contains number of dwords
     mov esi, 0x00FFFF00 ; green
     call color_image
 
@@ -788,9 +779,13 @@ static id_mask:data
 root_visual_id: dd 0
 static root_visual_id:data
 
+ball_x: dd ((WINDOW_W - BALL_W) / 2)
+ball_y: dd ((WINDOW_H - BALL_H) / 2)
+
 section .bss
 
-image:
-    resb IMAGE_SIZE
+ball:
+    resb BALL_SIZE
+
 
 
