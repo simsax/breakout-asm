@@ -53,10 +53,6 @@ static x11_connect_to_server:function
     ret
 
 die:
-die_poll:
-die_pollerr:
-die_pollhup:
-die_reply:
     mov rax, SYS_EXIT
     mov rdi, 1
     syscall
@@ -391,7 +387,7 @@ static x11_read_reply:function
     syscall
 
     cmp rax, 1
-    jle die_reply
+    jle die
 
     mov al, byte [rsp]
 
@@ -431,13 +427,13 @@ static poll_messages:function
         syscall
 
         cmp rax, 0
-        jle die_poll
+        jle die
 
         cmp dword [rsp + 2*4], POLLERR  
-        je die_pollerr
+        je die
 
         cmp dword [rsp + 2*4], POLLHUP  
-        je die_pollhup
+        je die
 
         mov rdi, [rsp + 0*4]
         call x11_read_reply
@@ -470,9 +466,9 @@ static poll_messages:function
         ;    mov rsi, [rsp + 16] ; window id
         ;    mov edx, [rsp + 20] ; gc id
         ;    lea rcx, [image]
-        ;    mov r8d, WINDOW_W
+        ;    mov r8d, WINDOW_H
         ;    shl r8d, 16
-        ;    or r8d, WINDOW_H
+        ;    or r8d, WINDOW_W
         ;    mov r9d, 0 ; x
         ;    shl r9d, 16
         ;    or r9d, 0 ; y
@@ -483,12 +479,12 @@ static poll_messages:function
             mov rsi, [rsp + 16] ; window id
             mov edx, [rsp + 20] ; gc id
             lea rcx, [tiny_image]
-            mov r8d, 10 ; width
+            mov r8d, WINDOW_H_TINY ; height
             shl r8d, 16
-            or r8d, 10 ; height
-            mov r9d, 0 ; x
+            or r8d, WINDOW_W_TINY ; width
+            mov r9d, 100 ; y
             shl r9d, 16
-            or r9d, 0 ; y
+            or r9d, 100 ; x
             call x11_put_image_stack
 
         jmp .loop
@@ -679,9 +675,8 @@ static x11_put_image_stack:function
     mov dword [rsp + 2*4], edx ; gcontext
     mov dword [rsp + 3*4], r8d ; width, height
     mov dword [rsp + 4*4], r9d ; x, y
-    mov dword [rsp + 4*5], 24 ; depth
-    shl dword [rsp + 4*5], 8 ; left-pad is zero
-
+    mov dword [rsp + 5*4], 24 ; depth
+    shl dword [rsp + 5*4], 8 ; left-pad is zero
 
     %define X11_OP_PUT_IMAGE 0x48
     %define FORMAT 0x2 ; ZPixmap
@@ -690,34 +685,45 @@ static x11_put_image_stack:function
     mov qword [rsp + 1024 - 8], rdi ; store the socket file descriptor on the stack to free the register.
     mov qword [rsp + 1024 - 16], rcx ; store the image data on the stack
 
-    mov eax, r8d
-    and eax, 0xFFFF
-    shr r8d, 16
-    mul r8d
-    imul rax, 3
+    ;mov eax, r8d
+    ;and eax, 0xFFFF
+    ;shr r8d, 16
+    ;mul r8d
+    ;imul rax, 3
 
     ; eax should have the length now
-    mov edi, eax
-    mov r8d, eax
+    mov edi, TINY_IMAGE_SIZE
+    mov r8d, TINY_IMAGE_SIZE
     call calc_padding
     mov r9d, eax ; p
     mov eax, r8d ; n
     add eax, r9d ; n + p
     shr eax, 2 ; (n + p) / 4
     add eax, 6 ; 6 + (n + p) / 4
+    add eax, 12
 
+    ; with 2x2, need to add 1, so it becomes 6 + 3 ; 9
+    ; with 3x3, need to add 2, so it becomes 6 + 9 ; 15
+    ; with 4x4, need to add 4, so it becomes 6 + 16 ; 22 ; 4 missing
+    ; with 5x5, need to add 6, so it becomes 6 + 16 ; 22 ; 6 missing
+    ; with 6x6, need to add 9, so it becomes 6 + 16 ;    ; 9 missing
+    ; with 7x7, need to add 12, so it becomes 6 + 16 ;    ; 12 missing
+
+    ; it's normal that the number of pixels to add become the missing pixels, because they are 
+    ; black (not set). However, this means that there's a data encoding issue
+    ; The image data that I set, actually encodes less pixels than I think
+    ; Why?
+
+    xor r8, r8
     mov r8d, eax ; packet count
     shl eax, 16
     or [rsp + 0*4], eax
 
-    mov r10d, r8d
-    sub r10d, 6 ; remove header
-
     ; copy the image data into the packet data on the stack
     mov rsi, qword [rsp + 1024 - 16]
-    lea rdi, [rsp + 4*6] ; destination
+    lea rdi, [rsp + 6*4] ; destination
     cld ; move forward
-    mov ecx, r10d ; image length
+    mov ecx, TINY_IMAGE_SIZE ; image length
     rep movsb ; copy
 
     ; write header first
@@ -735,7 +741,5 @@ static x11_put_image_stack:function
     add rsp, 1024
     pop rbp
     ret
-
-; try to change pixmap, use memset, check that stack actually contains correct image data etc
 
 %endif

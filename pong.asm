@@ -1,7 +1,10 @@
 %define WINDOW_W 800
 %define WINDOW_H 600
 %define IMAGE_SIZE (WINDOW_W * WINDOW_H * 3) ; 24-bit pixels
-%define TINY_IMAGE_SIZE (10 * 10 * 3) ; 24-bit pixels
+
+%define WINDOW_W_TINY 7
+%define WINDOW_H_TINY 7
+%define TINY_IMAGE_SIZE (WINDOW_W_TINY * WINDOW_H_TINY * 3) ; 24-bit pixels
 
 %include "common.asm"
 %include "x11.asm"
@@ -85,11 +88,17 @@ _start:
     mov esi, 0x0000FF00 ; green
     call color_image
 
+    ;; initialize image data
+    ;lea rdi, [tiny_image]
+    ;mov rdx, TINY_IMAGE_SIZE
+    ;mov esi, 0x0000FF00 ; green
+    ;call color_image
+
     ; initialize image data
     lea rdi, [tiny_image]
     mov rdx, TINY_IMAGE_SIZE
-    mov esi, 0x0000FF00 ; green
-    call color_image
+    mov sil, 0xFF ; white
+    call memset
 
     call x11_connect_to_server
     mov r15, rax ; Store the socket file descriptor in r15.
@@ -147,7 +156,7 @@ section .rodata
 newline: db 10
 static newline:data
 
-sun_path: db "/tmp/.X11-unix/X0", 0
+sun_path: db "/tmp/.X11-unix/X9", 0
 static sun_path:data
 
 hello_world: db "Hello, world!", 0
@@ -175,3 +184,7 @@ image:
 tiny_image:
     resb TINY_IMAGE_SIZE
 
+
+; TODO: put display back to 0
+;000:<:792d7:996: Request(72): PutImage format=ZPixmap(0x02) drawable=0x04400002 gc=0x04400001 width=18 height=18 dst-x=100 dst-y=100 left-pad=0x00 depth=0x18
+;000:>:92d4:Error 16=Length: major=72, minor=0, bad=0x04400001, seq=92d4
