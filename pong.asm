@@ -17,7 +17,7 @@
 %define WINDOW_W 800
 %define WINDOW_H 600
 %define BALL_W 100
-%define BALL_H 100
+%define BALL_H 200
 %define BALL_SIZE (BALL_W * BALL_H * 4) ; BGRX format
 
 global _start
@@ -473,6 +473,14 @@ static poll_messages:function
         cmp byte [rsp + 24], 1 ; exposed?
         jnz .loop
 
+        .clear_window:
+            mov rdi, [rsp] ; socket fd
+            mov rsi, [rsp + 16] ; window id
+            mov edx, WINDOW_H
+            shl edx, 16
+            or edx, WINDOW_W
+            call x11_clear_window
+
         .draw_ball:
             mov rdi, [rsp] ; socket fd
             mov rsi, [rsp + 16] ; window id
@@ -481,15 +489,32 @@ static poll_messages:function
             mov r8d, BALL_H
             shl r8d, 16
             or r8d, BALL_W
-            mov r9d, [ball_y]
+            ;cvtss2si r9d, [ball_y]
+            ;shl r9d, 16
+            ;cvtss2si r10d, [ball_x]
+            ;or r9d, r10d
+            mov r9d, [ball_y_int]
             shl r9d, 16
-            or r9d, [ball_x]
+            mov r10d, [ball_x_int]
+            or r9d, r10d
             ; pass image size on the stack
             sub rsp, 16 ; maintain 16-byte alignment
             mov qword [rsp], BALL_SIZE
             call x11_put_image
             add rsp, 16
 
+        ;.update_ball_position:
+        ;    mov r10d, [ball_x_int]
+        ;    add r10d, 10
+        ;    mov [ball_x_int], r10d
+
+            ;movss xmm0, [ball_x]
+            ;cvtss2si r10d, xmm0
+            ;cmp r10d, (WINDOW_W - BALL_W)
+            ;jge .loop
+            ;addss xmm0, [ball_offset]
+            ;movss [ball_x], xmm0
+            
         jmp .loop
 
     add rsp, 32
@@ -568,6 +593,35 @@ static x11_draw_text:function
     jnz die
 
     add rsp, 1024
+
+    pop rbp
+    ret
+
+; Clears the window 
+; @param rdi The socket file descriptor
+; @param esi The window id
+; @param edx packed width, height
+x11_clear_window:
+static x11_clear_window:function
+    push rbp
+    mov rbp, rsp
+
+    sub rsp, 16
+
+    %define X11_OP_CLEAR_AREA 0x3D
+    %define REQUEST_LENGTH 0x4
+
+    mov dword [rsp + 0*4], X11_OP_CLEAR_AREA | (REQUEST_LENGTH << 16)
+    mov dword [rsp + 1*4], esi
+    mov dword [rsp + 2*4], 0
+    mov dword [rsp + 3*4], edx
+
+    mov rax, SYS_WRITE
+    mov rdx, (REQUEST_LENGTH * 4)
+    lea rsi, [rsp]
+    syscall
+
+    add rsp, 16
 
     pop rbp
     ret
@@ -700,7 +754,7 @@ _start:
     ; initialize image data
     lea rdi, [ball]
     mov rdx, (BALL_SIZE / 4) ; rdx contains number of dwords
-    mov esi, 0x00FFFF00 ; green
+    mov esi, 0x0000FF00 ; green
     call color_image
 
     call x11_connect_to_server
@@ -762,9 +816,6 @@ static newline:data
 sun_path: db "/tmp/.X11-unix/X0", 0
 static sun_path:data
 
-hello_world: db "Hello, world!", 0
-static hello_world:data
-
 section .data
 
 id: dd 0
@@ -779,13 +830,19 @@ static id_mask:data
 root_visual_id: dd 0
 static root_visual_id:data
 
-ball_x: dd ((WINDOW_W - BALL_W) / 2)
-ball_y: dd ((WINDOW_H - BALL_H) / 2)
+ball_x: dd 0.0
+ball_y: dd 0.0
+ball_offset: dd 0.1
+
+ball_x_int: dd 0
+ball_y_int: dd 0
+
+;ball_x: dd ((WINDOW_W - BALL_W) / 2)
+;ball_y: dd ((WINDOW_H - BALL_H) / 2)
 
 section .bss
 
 ball:
     resb BALL_SIZE
-
 
 
