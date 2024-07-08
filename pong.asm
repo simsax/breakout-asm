@@ -16,8 +16,8 @@
 ; graphics constants
 %define WINDOW_W 800
 %define WINDOW_H 600
-%define BALL_W 100
-%define BALL_H 200
+%define BALL_W 400
+%define BALL_H 400
 %define BALL_SIZE (BALL_W * BALL_H * 4) ; BGRX format
 
 global _start
@@ -499,8 +499,48 @@ static poll_messages:function
             or r9d, r10d
             ; pass image size on the stack
             sub rsp, 16 ; maintain 16-byte alignment
-            mov qword [rsp], BALL_SIZE
+            mov r11d, BALL_SIZE
+            cmp r11d, 0x3FFD8 ; max image size allowed in one request
+            jle .next
+            ; send first part of the image
+            shr r11d, 1 ; divide size by 2
+            mov r8d, (BALL_H / 2)
+            shl r8d, 16
+            or r8d, BALL_W
+            mov dword [rsp], r11d
             call x11_put_image
+            
+            ; send second part of the image
+            sub r11d, 0x3FFD8 ; r11d has the remaining size
+
+            ; pointer to start of the image has to advance as well
+            ; also, prev registers are corrupted so I'll just duplicate previous code and fix it later
+
+            ; I need not only to keep track of the length, but I also have to adjust width and height
+            ; I suppose width is the same as original image, height is half of that
+            ; So if image is too big I just split it in half
+
+            ; max image size is 524232 kill me
+
+            mov rdi, [rsp] ; socket fd
+            mov rsi, [rsp + 16] ; window id
+            mov edx, [rsp + 20] ; gc id
+            lea rcx, [ball + 0x3FFD8]
+            mov r8d, BALL_H
+            shl r8d, 16
+            or r8d, BALL_W
+            ;cvtss2si r9d, [ball_y]
+            ;shl r9d, 16
+            ;cvtss2si r10d, [ball_x]
+            ;or r9d, r10d
+            mov r9d, [ball_y_int]
+            shl r9d, 16
+            mov r10d, [ball_x_int]
+            or r9d, r10d
+
+            .next:
+                mov dword [rsp], r11d
+                call x11_put_image
             add rsp, 16
 
         ;.update_ball_position:
@@ -627,6 +667,7 @@ static x11_clear_window:function
     ret
 
 
+
 ; Put image in a X11 window (figured it out on my own)
 ; @param rdi The socket file descriptor
 ; @param esi The window id
@@ -649,12 +690,12 @@ static x11_put_image:function
     mov dword [rsp + 5*4], 24 ; depth
     shl dword [rsp + 5*4], 8 ; left-pad is zero
 
+    mov qword [rsp + 1024 - 8], rdi ; store the socket file descriptor on the stack to free the register
+    mov qword [rsp + 1024 - 16], rcx ; store the image data on the stack
+
     %define X11_OP_PUT_IMAGE 0x48
     %define FORMAT 0x2 ; ZPixmap
     mov dword [rsp + 0*4], X11_OP_PUT_IMAGE | (FORMAT << 8)
-
-    mov qword [rsp + 1024 - 8], rdi ; store the socket file descriptor on the stack to free the register
-    mov qword [rsp + 1024 - 16], rcx ; store the image data on the stack
 
     ; image size (+16 because [rbp] contains previous rbp and [rbp + 8] contains the return address pushed by call
     mov dword edi, [rbp + 16]
@@ -664,39 +705,47 @@ static x11_put_image:function
     add eax, r9d ; n + p
     shr eax, 2 ; (n + p) / 4
     add eax, 6 ; 6 + (n + p) / 4
+
+    ; TODO: this breaks when request length is bigger than 2 bytes
+    ; now I'll try to fix it by splitting the request when length > 2 bytes
+    ; I can assume no image is going to be bigger than 4 bytes of data, so I only need 2 requests max
+    ; The above assumption is wrong!!!
+
     shl eax, 16
     or [rsp + 0*4], eax
 
     ; write header first
-    mov rdx, 24
-    mov rdi, qword [rsp + 1024 - 8] ; fd
-    mov rax, SYS_WRITE
-    lea rsi, [rsp]
-    syscall
+    .write_header:
+        mov rdx, 24
+        mov rdi, qword [rsp + 1024 - 8] ; fd
+        mov rax, SYS_WRITE
+        lea rsi, [rsp]
+        syscall
 
-    cmp rax, rdx
-    jnz die
+        cmp rax, rdx
+        jnz die
 
     ; now write data
-    mov rdx, [rbp + 16] ; total number of bytes to write
-    mov rdi, qword [rsp + 1024 - 8] ; fd
-    mov r10, qword [rsp + 1024 - 16] ; pointer to data
-.write:
-    mov rax, SYS_WRITE
-    mov rsi, r10
-    syscall
+    .write_data:
+        mov dword edx, [rbp + 16] ; total number of bytes to write
+        mov rdi, qword [rsp + 1024 - 8] ; fd
+        mov r10, qword [rsp + 1024 - 16] ; pointer to data
 
-    cmp rax, rdx
-    jz .done
-    add r10, rax ; increment pointer by number of bytes written (is this right?)
-    sub rdx, rax
-    jmp .write
+        .write:
+        mov rax, SYS_WRITE
+        mov rsi, r10
+        syscall
 
-.done:
-    add rsp, 1024
-    pop rbp
-    ret
+        cmp rax, rdx
+        jz .done
+        add r10, rax ; increment image data pointer by number of bytes written
+        sub rdx, rax
+        jmp .write
 
+    .done:
+        add rsp, 1024
+        pop rbp
+        ret
 
 ; @param rdi: pointer to string
 strlen:
@@ -837,12 +886,8 @@ ball_offset: dd 0.1
 ball_x_int: dd 0
 ball_y_int: dd 0
 
-;ball_x: dd ((WINDOW_W - BALL_W) / 2)
-;ball_y: dd ((WINDOW_H - BALL_H) / 2)
-
 section .bss
 
 ball:
     resb BALL_SIZE
-
 
