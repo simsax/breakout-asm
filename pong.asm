@@ -395,6 +395,7 @@ static set_fd_non_blocking:function
     ret
 
 ; Read the X11 server reply.
+; @param rdi The socket file descriptor.
 ; @return The message code in al.
 x11_read_reply:
 static x11_read_reply:function
@@ -418,6 +419,36 @@ static x11_read_reply:function
 
     pop rbp
     ret
+
+; Read the X11 server reply for query extension
+; @param rdi The socket file descriptor.
+; @return The extension opcode in eax
+x11_read_extension_reply:
+static x11_read_extension_reply:function
+    push rbp
+    mov rbp, rsp
+
+    sub rsp, 32
+    
+    mov rax, SYS_READ
+    mov rdi, rdi
+    lea rsi, [rsp]
+    mov rdx, 32
+    syscall
+
+    cmp rax, 1
+    jle die
+
+    ; extract opcode
+    mov eax, [rsp + 2*4]
+    shr eax, 8
+    and eax, 0xFF
+
+    add rsp, 32
+
+    pop rbp
+    ret
+
 
 ; Poll indefinitely messages from the X11 server with poll(2)
 ; @param rdi The socket file descriptor.
@@ -499,48 +530,8 @@ static poll_messages:function
             or r9d, r10d
             ; pass image size on the stack
             sub rsp, 16 ; maintain 16-byte alignment
-            mov r11d, BALL_SIZE
-            cmp r11d, 0x3FFD8 ; max image size allowed in one request
-            jle .next
-            ; send first part of the image
-            shr r11d, 1 ; divide size by 2
-            mov r8d, (BALL_H / 2)
-            shl r8d, 16
-            or r8d, BALL_W
-            mov dword [rsp], r11d
-            call x11_put_image
-            
-            ; send second part of the image
-            sub r11d, 0x3FFD8 ; r11d has the remaining size
-
-            ; pointer to start of the image has to advance as well
-            ; also, prev registers are corrupted so I'll just duplicate previous code and fix it later
-
-            ; I need not only to keep track of the length, but I also have to adjust width and height
-            ; I suppose width is the same as original image, height is half of that
-            ; So if image is too big I just split it in half
-
-            ; max image size is 524232 kill me
-
-            mov rdi, [rsp] ; socket fd
-            mov rsi, [rsp + 16] ; window id
-            mov edx, [rsp + 20] ; gc id
-            lea rcx, [ball + 0x3FFD8]
-            mov r8d, BALL_H
-            shl r8d, 16
-            or r8d, BALL_W
-            ;cvtss2si r9d, [ball_y]
-            ;shl r9d, 16
-            ;cvtss2si r10d, [ball_x]
-            ;or r9d, r10d
-            mov r9d, [ball_y_int]
-            shl r9d, 16
-            mov r10d, [ball_x_int]
-            or r9d, r10d
-
-            .next:
-                mov dword [rsp], r11d
-                call x11_put_image
+            mov dword [rsp], BALL_SIZE
+            call x11_put_image_ext
             add rsp, 16
 
         ;.update_ball_position:
@@ -555,7 +546,9 @@ static poll_messages:function
             ;addss xmm0, [ball_offset]
             ;movss [ball_x], xmm0
             
-        jmp .loop
+        ;jmp .loop
+    .loop2:
+        jmp .loop2
 
     add rsp, 32
     pop rbp
@@ -668,7 +661,7 @@ static x11_clear_window:function
 
 
 
-; Put image in a X11 window (figured it out on my own)
+; Put image in a X11 window, using extended length protocol (this one is by me)
 ; @param rdi The socket file descriptor
 ; @param esi The window id
 ; @param edx The gc id
@@ -676,19 +669,19 @@ static x11_clear_window:function
 ; @param r8d packed width, height
 ; @param r9d Packed x and y
 ; @param [rsp] Image size
-x11_put_image:
+x11_put_image_ext:
 static x11_put_image:function
     push rbp
     mov rbp, rsp
 
     sub rsp, 1024
 
-    mov dword [rsp + 1*4], esi ; drawable
-    mov dword [rsp + 2*4], edx ; gcontext
-    mov dword [rsp + 3*4], r8d ; width, height
-    mov dword [rsp + 4*4], r9d ; x, y
-    mov dword [rsp + 5*4], 24 ; depth
-    shl dword [rsp + 5*4], 8 ; left-pad is zero
+    mov dword [rsp + 2*4], esi ; drawable
+    mov dword [rsp + 3*4], edx ; gcontext
+    mov dword [rsp + 4*4], r8d ; width, height
+    mov dword [rsp + 5*4], r9d ; x, y
+    mov dword [rsp + 6*4], 24 ; depth
+    shl dword [rsp + 6*4], 8 ; left-pad is zero
 
     mov qword [rsp + 1024 - 8], rdi ; store the socket file descriptor on the stack to free the register
     mov qword [rsp + 1024 - 16], rcx ; store the image data on the stack
@@ -704,19 +697,13 @@ static x11_put_image:function
     mov eax, edi ; n
     add eax, r9d ; n + p
     shr eax, 2 ; (n + p) / 4
-    add eax, 6 ; 6 + (n + p) / 4
+    add eax, 7 ; 7 + (n + p) / 4
 
-    ; TODO: this breaks when request length is bigger than 2 bytes
-    ; now I'll try to fix it by splitting the request when length > 2 bytes
-    ; I can assume no image is going to be bigger than 4 bytes of data, so I only need 2 requests max
-    ; The above assumption is wrong!!!
-
-    shl eax, 16
-    or [rsp + 0*4], eax
+    mov dword [rsp + 1*4], eax ; extended length field
 
     ; write header first
     .write_header:
-        mov rdx, 24
+        mov rdx, 28
         mov rdi, qword [rsp + 1024 - 8] ; fd
         mov rax, SYS_WRITE
         lea rsi, [rsp]
@@ -746,6 +733,80 @@ static x11_put_image:function
         add rsp, 1024
         pop rbp
         ret
+
+; Determines if the named extension is present
+; @param rdi The socket file descriptor
+; @param rsi The extension name
+; @param edx Length of extension name
+x11_query_extension:
+static x11_query_extension:function
+    push rbp
+    mov rbp, rsp
+
+    sub rsp, 1024
+
+    %define X11_OP_QUERY_EXTENSION 0x62
+    mov qword [rsp + 1024 - 8], rdi 
+
+    mov r8d, edx
+    mov edi, edx
+    call calc_padding
+    mov r9d, eax ; p
+    mov eax, r8d ; n
+    add eax, r9d ; n + p
+    shr eax, 2 ; (n + p) / 4
+    add eax, 2 ; 2 + (n + p) / 4
+    mov r10d, eax
+    shl eax, 16
+    or eax, X11_OP_QUERY_EXTENSION
+    mov dword [rsp + 0*4], eax
+    mov dword [rsp + 1*4], r8d
+
+    lea rdi, [rsp + 2*4]
+    cld
+    mov ecx, r8d
+    rep movsb
+
+    mov rdx, r10
+    imul rdx, 4
+    mov rax, SYS_WRITE
+    lea rsi, [rsp]
+    mov rdi, qword [rsp + 1024 - 8] ; fd
+    syscall
+
+    cmp rax, rdx
+    jnz die
+
+    add rsp, 1024
+
+    pop rbp
+    ret
+
+; Enable big request extension
+; @param rdi The socket file descriptor
+; @param rsi The extension opcode
+x11_big_req_enable:
+static x11_big_req_enable:function
+    push rbp
+    mov rbp, rsp
+    sub rsp, 8
+
+    mov dword [rsp], 1
+    shl dword [rsp], 16
+    or [rsp], rsi
+
+    mov rdx, 4
+    mov rax, SYS_WRITE
+    lea rsi, [rsp]
+    syscall
+
+    cmp rax, rdx
+    jnz die
+
+    add rsp, 8
+    pop rbp
+    ret
+
 
 ; @param rdi: pointer to string
 strlen:
@@ -817,6 +878,22 @@ _start:
     call x11_next_id
     mov r14d, eax ; Store the font_id in r14.
 
+    ; check if big request extension is present
+    mov rdi, r15
+    lea rsi, [big_req_ext_name]
+    mov edx, [big_req_ext_len]
+    call x11_query_extension
+    call x11_read_extension_reply
+    test rax, rax
+    jz die
+
+    ; enable big request extension
+    mov rsi, rax
+    call x11_big_req_enable
+    call x11_read_reply
+    test rax, rax
+    jz die
+
     mov rdi, r15
     mov esi, r14d
     call x11_open_font
@@ -864,6 +941,12 @@ static newline:data
 
 sun_path: db "/tmp/.X11-unix/X0", 0
 static sun_path:data
+
+big_req_ext_name: db "BIG-REQUESTS"
+static big_req_ext_name:data
+
+big_req_ext_len: db 12
+static big_req_ext_len:data
 
 section .data
 
