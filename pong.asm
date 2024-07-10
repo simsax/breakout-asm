@@ -12,6 +12,7 @@
 %define SYS_CONNECT 42
 %define SYS_EXIT 60
 %define SYS_FCNTL 72
+%define EAGAIN -11
 
 ; graphics constants
 %define WINDOW_W 800
@@ -495,44 +496,41 @@ static poll_messages:function
         %define X11_EVENT_EXPOSURE 0xc
         cmp eax, X11_EVENT_EXPOSURE
         jnz .received_other_event
-
         .received_exposed_event:
         mov byte [rsp + 24], 1 ; Mark as exposed.
-
         .received_other_event:
-
-        cmp byte [rsp + 24], 1 ; exposed?
+        cmp byte [rsp + 24], 1 ; exposed
         jnz .loop
 
         .clear_window:
-            mov rdi, [rsp] ; socket fd
-            mov rsi, [rsp + 16] ; window id
-            mov edx, WINDOW_H
-            shl edx, 16
-            or edx, WINDOW_W
-            call x11_clear_window
+        mov rdi, [rsp] ; socket fd
+        mov rsi, [rsp + 16] ; window id
+        mov edx, WINDOW_H
+        shl edx, 16
+        or edx, WINDOW_W
+        call x11_clear_window
 
         .draw_ball:
-            mov rdi, [rsp] ; socket fd
-            mov rsi, [rsp + 16] ; window id
-            mov edx, [rsp + 20] ; gc id
-            lea rcx, [ball]
-            mov r8d, BALL_H
-            shl r8d, 16
-            or r8d, BALL_W
-            ;cvtss2si r9d, [ball_y]
-            ;shl r9d, 16
-            ;cvtss2si r10d, [ball_x]
-            ;or r9d, r10d
-            mov r9d, [ball_y_int]
-            shl r9d, 16
-            mov r10d, [ball_x_int]
-            or r9d, r10d
-            ; pass image size on the stack
-            sub rsp, 16 ; maintain 16-byte alignment
-            mov dword [rsp], BALL_SIZE
-            call x11_put_image_ext
-            add rsp, 16
+        mov rdi, [rsp] ; socket fd
+        mov rsi, [rsp + 16] ; window id
+        mov edx, [rsp + 20] ; gc id
+        lea rcx, [ball]
+        mov r8d, BALL_H
+        shl r8d, 16
+        or r8d, BALL_W
+        ;cvtss2si r9d, [ball_y]
+        ;shl r9d, 16
+        ;cvtss2si r10d, [ball_x]
+        ;or r9d, r10d
+        mov r9d, [ball_y_int]
+        shl r9d, 16
+        mov r10d, [ball_x_int]
+        or r9d, r10d
+        ; pass image size on the stack
+        sub rsp, 16 ; maintain 16-byte alignment
+        mov dword [rsp], BALL_SIZE
+        call x11_put_image_ext
+        add rsp, 16
 
         ;.update_ball_position:
         ;    mov r10d, [ball_x_int]
@@ -546,9 +544,7 @@ static poll_messages:function
             ;addss xmm0, [ball_offset]
             ;movss [ball_x], xmm0
             
-        ;jmp .loop
-    .loop2:
-        jmp .loop2
+        jmp .loop
 
     add rsp, 32
     pop rbp
@@ -703,36 +699,39 @@ static x11_put_image:function
 
     ; write header first
     .write_header:
-        mov rdx, 28
-        mov rdi, qword [rsp + 1024 - 8] ; fd
-        mov rax, SYS_WRITE
-        lea rsi, [rsp]
-        syscall
+    mov rdx, 28
+    mov rdi, qword [rsp + 1024 - 8] ; fd
+    mov rax, SYS_WRITE
+    lea rsi, [rsp]
+    syscall
 
-        cmp rax, rdx
-        jnz die
+    cmp rax, rdx
+    jnz die
 
     ; now write data
     .write_data:
-        mov dword edx, [rbp + 16] ; total number of bytes to write
-        mov rdi, qword [rsp + 1024 - 8] ; fd
-        mov r10, qword [rsp + 1024 - 16] ; pointer to data
+    mov dword edx, [rbp + 16] ; total number of bytes to write
+    mov rdi, qword [rsp + 1024 - 8] ; fd
+    mov r10, qword [rsp + 1024 - 16] ; pointer to data
 
-        .write:
-        mov rax, SYS_WRITE
-        mov rsi, r10
-        syscall
+    .write:
+    mov rax, SYS_WRITE
+    mov rsi, r10
+    syscall
 
-        cmp rax, rdx
-        jz .done
-        add r10, rax ; increment image data pointer by number of bytes written
-        sub rdx, rax
-        jmp .write
+    cmp rax, rdx
+    jz .done
+    ; forgetting this check costed me several hours of debugging
+    cmp rax, EAGAIN
+    je .write
+    add r10, rax ; increment image data pointer by number of bytes written
+    sub rdx, rax
+    jmp .write
 
     .done:
-        add rsp, 1024
-        pop rbp
-        ret
+    add rsp, 1024
+    pop rbp
+    ret
 
 ; Determines if the named extension is present
 ; @param rdi The socket file descriptor
@@ -864,7 +863,7 @@ _start:
     ; initialize image data
     lea rdi, [ball]
     mov rdx, (BALL_SIZE / 4) ; rdx contains number of dwords
-    mov esi, 0x0000FF00 ; green
+    mov esi, 0x00FF00FF
     call color_image
 
     call x11_connect_to_server
