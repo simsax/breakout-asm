@@ -17,9 +17,9 @@
 ; graphics constants
 %define WINDOW_W 800
 %define WINDOW_H 600
-%define BALL_W 400
-%define BALL_H 400
-%define BALL_SIZE (BALL_W * BALL_H * 4) ; BGRX format
+%define WINDOW_SIZE (WINDOW_W * WINDOW_H * 4) ; BGRX format
+%define BALL_W 800
+%define BALL_H 600
 
 global _start
 section .text
@@ -52,7 +52,7 @@ static x11_connect_to_server:function
     ; Set sockaddr_un.sun_family to AF_UNIX
     ; Fill sockaddr_un.sun_path with: "/tmp/.X11-unix/X0"
     mov word [rsp], AF_UNIX
-    lea rsi, sun_path
+    lea rsi, [sun_path]
     mov r12, rdi
     lea rdi, [rsp + 2]
     cld ; ensure the copy is done forwards
@@ -510,40 +510,21 @@ static poll_messages:function
         or edx, WINDOW_W
         call x11_clear_window
 
-        .draw_ball:
+        .draw_image:
         mov rdi, [rsp] ; socket fd
         mov rsi, [rsp + 16] ; window id
         mov edx, [rsp + 20] ; gc id
-        lea rcx, [ball]
-        mov r8d, BALL_H
+        lea rcx, [image]
+        mov r8d, WINDOW_H
         shl r8d, 16
-        or r8d, BALL_W
-        ;cvtss2si r9d, [ball_y]
-        ;shl r9d, 16
-        ;cvtss2si r10d, [ball_x]
-        ;or r9d, r10d
-        mov r9d, [ball_y_int]
-        shl r9d, 16
-        mov r10d, [ball_x_int]
-        or r9d, r10d
+        or r8d, WINDOW_W
+        xor r9d, r9d
         ; pass image size on the stack
         sub rsp, 16 ; maintain 16-byte alignment
-        mov dword [rsp], BALL_SIZE
+        mov dword [rsp], WINDOW_SIZE
         call x11_put_image_ext
         add rsp, 16
 
-        ;.update_ball_position:
-        ;    mov r10d, [ball_x_int]
-        ;    add r10d, 10
-        ;    mov [ball_x_int], r10d
-
-            ;movss xmm0, [ball_x]
-            ;cvtss2si r10d, xmm0
-            ;cmp r10d, (WINDOW_W - BALL_W)
-            ;jge .loop
-            ;addss xmm0, [ball_offset]
-            ;movss [ball_x], xmm0
-            
         jmp .loop
 
     add rsp, 32
@@ -613,11 +594,14 @@ static x11_draw_text:function
 
     mov rdx, rax ; packet u32 count
     imul rdx, 4
+    .write:
     mov rax, SYS_WRITE
     mov rdi, qword [rsp + 1024 - 8] ; fd
     lea rsi, [rsp]
     syscall
 
+    cmp rax, EAGAIN
+    je .write
     cmp rax, rdx
     jnz die
 
@@ -645,10 +629,17 @@ static x11_clear_window:function
     mov dword [rsp + 2*4], 0
     mov dword [rsp + 3*4], edx
 
+    .write:
     mov rax, SYS_WRITE
     mov rdx, (REQUEST_LENGTH * 4)
     lea rsi, [rsp]
     syscall
+
+    cmp rax, EAGAIN
+    je .write
+
+    cmp rax, rdx
+    jnz die
 
     add rsp, 16
 
@@ -766,12 +757,16 @@ static x11_query_extension:function
     mov ecx, r8d
     rep movsb
 
+    .write:
     mov rdx, r10
     imul rdx, 4
     mov rax, SYS_WRITE
     lea rsi, [rsp]
     mov rdi, qword [rsp + 1024 - 8] ; fd
     syscall
+
+    cmp rax, EAGAIN
+    je .write
 
     cmp rax, rdx
     jnz die
@@ -795,9 +790,13 @@ static x11_big_req_enable:function
     or [rsp], rsi
 
     mov rdx, 4
+    .write:
     mov rax, SYS_WRITE
     lea rsi, [rsp]
     syscall
+
+    cmp rax, EAGAIN
+    je .write
 
     cmp rax, rdx
     jnz die
@@ -837,7 +836,7 @@ print:
 println:
     ; void println(char* msg);
     call print
-    mov rdi, newline
+    mov rdi, [newline]
     call print
     ret
 
@@ -859,12 +858,75 @@ color_image:
     rep stosd
     ret
 
+; @param rdi: pointer to image data
+; @param esi: image width
+; @param edx: image height
+uv_pattern:
+    xor r8, r8 ; row index
+    xor r9, r9 ; col index
+
+    mov r12d, esi 
+    mov r13d, edx
+        
+    cvtsi2ss xmm0, esi ; width
+    cvtsi2ss xmm1, edx ; height
+    movss xmm5, [max_rgb]
+
+    .row_loop:
+    cmp r8d, r13d
+    jge .done
+    .col_loop:
+    cmp r9d, r12d
+    jge .next_row
+
+    ; u coord
+    cvtsi2ss xmm2, r9
+    divss xmm2, xmm0
+
+    ; v coord
+    cvtsi2ss xmm3, r8
+    divss xmm3, xmm1
+
+    ; convert them to int [0..255]
+    mulss xmm2, xmm5
+    mulss xmm3, xmm5
+    cvtss2si r10d, xmm2
+    cvtss2si r11d, xmm3
+
+    shl r10d, 16
+    shl r11d, 8
+    or r10d, r11d ; rgb color
+
+    ; calculate pointer offset
+    mov eax, r8d
+    mul r12d
+    add eax, r9d
+    imul eax, 4
+    
+    mov dword [rdi + rax], r10d
+
+    inc r9
+    jmp .col_loop
+    .next_row:
+    xor r9, r9
+    inc r8
+    jmp .row_loop
+
+    .done:
+    ret
+
 _start:
     ; initialize image data
-    lea rdi, [ball]
-    mov rdx, (BALL_SIZE / 4) ; rdx contains number of dwords
-    mov esi, 0x00FF00FF
+    lea rdi, [image]
+    mov rdx, (WINDOW_SIZE / 4) ; rdx contains number of dwords
+    mov esi, 0x00FF0000
     call color_image
+
+    ; try to print uv pattern
+    lea rdi, [image]
+    mov esi, WINDOW_W
+    mov edx, WINDOW_H
+    call uv_pattern
 
     call x11_connect_to_server
     mov r15, rax ; Store the socket file descriptor in r15.
@@ -935,31 +997,25 @@ _start:
 
 section .rodata
 
-newline: db 10
-static newline:data
+newline: dd 10
 
 sun_path: db "/tmp/.X11-unix/X0", 0
-static sun_path:data
 
 big_req_ext_name: db "BIG-REQUESTS"
-static big_req_ext_name:data
 
-big_req_ext_len: db 12
-static big_req_ext_len:data
+big_req_ext_len: dd 12
+
+max_rgb: dd 255.0 
 
 section .data
 
 id: dd 0
-static id:data
 
 id_base: dd 0
-static id_base:data
 
 id_mask: dd 0
-static id_mask:data
 
 root_visual_id: dd 0
-static root_visual_id:data
 
 ball_x: dd 0.0
 ball_y: dd 0.0
@@ -970,6 +1026,6 @@ ball_y_int: dd 0
 
 section .bss
 
-ball:
-    resb BALL_SIZE
+image:
+    resb WINDOW_SIZE
 
