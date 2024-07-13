@@ -13,20 +13,15 @@
 %define SYS_EXIT 60
 %define SYS_FCNTL 72
 %define EAGAIN -11
+%define POLL_TIMEOUT 0
 
 ; graphics constants
 %define WINDOW_W 800
-%define WINDOW_H 600
+%define WINDOW_H 800
 %define WINDOW_SIZE (WINDOW_W * WINDOW_H * 4) ; BGRX format
-%define BALL_W 800
-%define BALL_H 600
 
 global _start
 section .text
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;; x11 code is adapted from https://gaultier.github.io/blog/x11_x64.html ;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; Create a UNIX domain socket and connect to the X11 server.
 ; @returns The socket file descriptor.
@@ -478,11 +473,12 @@ static poll_messages:function
         mov rax, SYS_POLL
         lea rdi, [rsp]
         mov rsi, 1
-        mov rdx, -1
+        mov rdx, POLL_TIMEOUT
         syscall
 
         cmp rax, 0
-        jle die
+        je .update ; timeout
+        jl die
 
         cmp dword [rsp + 2*4], POLLERR  
         je die
@@ -502,13 +498,29 @@ static poll_messages:function
         cmp byte [rsp + 24], 1 ; exposed
         jnz .loop
 
-        .clear_window:
-        mov rdi, [rsp] ; socket fd
-        mov rsi, [rsp + 16] ; window id
+        .update:
+        movss xmm0, [circle_x]
+        movss xmm1, [circle_max_x]
+        movss xmm4, [circle_min_x]
+        movss xmm2, [speed]
+        ucomiss xmm0, xmm1
+        ja .invert
+        ucomiss xmm0, xmm4
+        jae .move
+        .invert:
+        mulss xmm2, [minus_one]
+        movss [speed], xmm2
+        .move:
+        addss xmm0, xmm2
+        movss [circle_x], xmm0
+        .done_update:   
+
+        ; render
+        .render_image:
+        lea rdi, [image]
+        mov esi, WINDOW_W
         mov edx, WINDOW_H
-        shl edx, 16
-        or edx, WINDOW_W
-        call x11_clear_window
+        call render_game
 
         .draw_image:
         mov rdi, [rsp] ; socket fd
@@ -783,7 +795,7 @@ x11_big_req_enable:
 static x11_big_req_enable:function
     push rbp
     mov rbp, rsp
-    sub rsp, 8
+    sub rsp, 16
 
     mov dword [rsp], 1
     shl dword [rsp], 16
@@ -801,7 +813,7 @@ static x11_big_req_enable:function
     cmp rax, rdx
     jnz die
 
-    add rsp, 8
+    add rsp, 16
     pop rbp
     ret
 
@@ -858,6 +870,97 @@ color_image:
     rep stosd
     ret
 
+; @param xmm0: x coord (normalized)
+; @param xmm1: y coord (normalized)
+; @param xmm2: circle_x
+; @param xmm3: circle_y
+; @param xmm4: circle_ray
+; @return eax: rgb color
+circle_fragment:
+    ;movss xmm2, [circle_ray]
+    ;movss xmm3, [circle_x]
+    ;movss xmm4, [circle_y]
+
+    ; (x_coord - circle_x)^2 + (y_coord - circle_y)^2 < circle_ray^2
+    mulss xmm4, xmm4 ; ray^2
+    subss xmm0, xmm2
+    mulss xmm0, xmm0 ; x^2
+    subss xmm1, xmm3
+    mulss xmm1, xmm1 ; y^2
+    addss xmm0, xmm1
+    ucomiss xmm0, xmm4
+    ja .black
+    mov eax, 0x00FF0000 ; red
+    jmp .done
+    .black:
+    mov eax, 0
+    .done:
+    ret
+
+; @param rdi: pointer to image data
+; @param esi: image width
+; @param edx: image height
+render_game:
+    xor r8, r8 ; row index
+    xor r9, r9 ; col index
+
+    mov r12d, esi 
+    mov r13d, edx
+        
+    cvtsi2ss xmm14, esi ; width
+    cvtsi2ss xmm15, edx ; height
+    movss xmm5, [max_rgb]
+    movss xmm6, [circle_ray]
+    movss xmm7, [circle_x]
+    movss xmm8, [circle_y]
+    movss xmm9, [one]
+
+    .row_loop:
+    cmp r8d, r13d
+    jge .done
+    .col_loop:
+    cmp r9d, r12d
+    jge .next_row
+
+    ; u coord
+    cvtsi2ss xmm2, r9
+    divss xmm2, xmm14
+
+    ; v coord
+    cvtsi2ss xmm3, r8
+    divss xmm3, xmm15
+    movss xmm4, xmm3
+    movss xmm3, xmm9
+    subss xmm3, xmm4
+
+    ; render circle
+    movss xmm0, xmm2 ; u
+    movss xmm1, xmm3 ; v
+    movss xmm2, xmm7 ; circle_x
+    movss xmm3, xmm8 ; circle_y
+    movss xmm4, xmm6 ; circle_ray
+    call circle_fragment
+
+    mov r10d, eax ; rgb color
+    
+    ; calculate pointer offset
+    mov eax, r8d
+    mul r12d
+    add eax, r9d
+    imul eax, 4
+    
+    mov dword [rdi + rax], r10d
+
+    inc r9
+    jmp .col_loop
+    .next_row:
+    xor r9, r9
+    inc r8
+    jmp .row_loop
+
+    .done:
+    ret
+
 ; @param rdi: pointer to image data
 ; @param esi: image width
 ; @param edx: image height
@@ -868,8 +971,8 @@ uv_pattern:
     mov r12d, esi 
     mov r13d, edx
         
-    cvtsi2ss xmm0, esi ; width
-    cvtsi2ss xmm1, edx ; height
+    cvtsi2ss xmm14, esi ; width
+    cvtsi2ss xmm15, edx ; height
     movss xmm5, [max_rgb]
 
     .row_loop:
@@ -881,11 +984,14 @@ uv_pattern:
 
     ; u coord
     cvtsi2ss xmm2, r9
-    divss xmm2, xmm0
+    divss xmm2, xmm14
 
     ; v coord
     cvtsi2ss xmm3, r8
-    divss xmm3, xmm1
+    divss xmm3, xmm15
+    movss xmm4, xmm3
+    movss xmm3, [one]
+    subss xmm3, xmm4
 
     ; convert them to int [0..255]
     mulss xmm2, xmm5
@@ -896,7 +1002,7 @@ uv_pattern:
     shl r10d, 16
     shl r11d, 8
     or r10d, r11d ; rgb color
-
+    
     ; calculate pointer offset
     mov eax, r8d
     mul r12d
@@ -916,12 +1022,6 @@ uv_pattern:
     ret
 
 _start:
-    ; initialize image data
-    lea rdi, [image]
-    mov rdx, (WINDOW_SIZE / 4) ; rdx contains number of dwords
-    mov esi, 0x00FF0000
-    call color_image
-
     ; try to print uv pattern
     lea rdi, [image]
     mov esi, WINDOW_W
@@ -995,7 +1095,7 @@ _start:
     xor rdi, rdi ; exit 0
     syscall
 
-section .rodata
+section .data
 
 newline: dd 10
 
@@ -1004,10 +1104,6 @@ sun_path: db "/tmp/.X11-unix/X0", 0
 big_req_ext_name: db "BIG-REQUESTS"
 
 big_req_ext_len: dd 12
-
-max_rgb: dd 255.0 
-
-section .data
 
 id: dd 0
 
@@ -1021,8 +1117,16 @@ ball_x: dd 0.0
 ball_y: dd 0.0
 ball_offset: dd 0.1
 
-ball_x_int: dd 0
-ball_y_int: dd 0
+circle_ray: dd 0.05
+circle_x: dd 0.05
+circle_y: dd 0.5
+circle_min_x: dd 0.05
+circle_max_x: dd 0.95
+speed: dd 0.001
+
+max_rgb: dd 255.0 
+one: dd 1.0
+minus_one: dd -1.0
 
 section .bss
 
