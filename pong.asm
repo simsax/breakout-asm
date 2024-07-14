@@ -12,6 +12,7 @@
 %define SYS_CONNECT 42
 %define SYS_EXIT 60
 %define SYS_FCNTL 72
+%define SYS_GETTIME 228
 %define EAGAIN -11
 %define POLL_TIMEOUT 0
 
@@ -499,18 +500,28 @@ static poll_messages:function
         jnz .loop
 
         .update:
+        call update_current_time
+        movsd xmm14, [cur_time]
+        movsd xmm15, [prev_time]
+        subsd xmm14, xmm15 ; xmm14 has now the delta time
+        cvtsd2ss xmm14, xmm14
+        ; prev_time = cur_time
+        movsd xmm15, [cur_time]
+        movsd [prev_time], xmm15
+        
         movss xmm0, [circle_x]
         movss xmm1, [circle_max_x]
         movss xmm4, [circle_min_x]
-        movss xmm2, [speed]
+        movss xmm2, [circle_dx]
         ucomiss xmm0, xmm1
         ja .invert
         ucomiss xmm0, xmm4
         jae .move
         .invert:
         mulss xmm2, [minus_one]
-        movss [speed], xmm2
+        movss [circle_dx], xmm2
         .move:
+        mulss xmm2, xmm14 ; ds = dv * dt
         addss xmm0, xmm2
         movss [circle_x], xmm0
         .done_update:   
@@ -1021,6 +1032,23 @@ uv_pattern:
     .done:
     ret
 
+; updates [cur_time] with the current time
+update_current_time:
+    mov rax, SYS_GETTIME
+    xor rdi, rdi
+    lea rsi, [timespec]
+    syscall
+    cmp rax, 0
+    jl die
+    mov edi, [timespec] ; seconds
+    mov rsi, [timespec + 8] ; nanoseconds
+    cvtsi2sd xmm0, edi
+    cvtsi2sd xmm1, rsi
+    divsd xmm1, [one_billion]
+    addsd xmm0, xmm1
+    movsd [cur_time], xmm0
+    ret
+
 _start:
     ; try to print uv pattern
     lea rdi, [image]
@@ -1086,6 +1114,11 @@ _start:
     mov rdi, r15 ; socket fd
     call set_fd_non_blocking
 
+    ; init cur_time
+    call update_current_time
+    movsd xmm0, [cur_time]
+    movsd [prev_time], xmm0
+
     mov rdi, r15 ; socket fd
     mov esi, ebx ; window id
     mov edx, r13d ; gc id
@@ -1122,13 +1155,20 @@ circle_x: dd 0.05
 circle_y: dd 0.5
 circle_min_x: dd 0.05
 circle_max_x: dd 0.95
-speed: dd 0.001
+circle_dx: dd 0.5
 
 max_rgb: dd 255.0 
 one: dd 1.0
 minus_one: dd -1.0
 
+cur_time: dq 0.0
+prev_time: dq 0.0
+one_billion: dq 1000000000.0 
+
 section .bss
+
+timespec:
+    resb 16
 
 image:
     resb WINDOW_SIZE
