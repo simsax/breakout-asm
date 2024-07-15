@@ -20,6 +20,8 @@
 %define WINDOW_W 800
 %define WINDOW_H 800
 %define WINDOW_SIZE (WINDOW_W * WINDOW_H * 4) ; BGRX format
+%define BALL_COLOR 0x00FF0000 ; red
+%define PAD_COLOR 0x000000FF ; blue
 
 global _start
 section .text
@@ -509,22 +511,39 @@ static poll_messages:function
         movsd xmm15, [cur_time]
         movsd [prev_time], xmm15
         
-        movss xmm0, [circle_x]
-        movss xmm1, [circle_max_x]
-        movss xmm4, [circle_min_x]
-        movss xmm2, [circle_dx]
+        movss xmm0, [ball_x]
+        movss xmm10, [ball_y]
+        movss xmm1, [ball_max]
+        movss xmm4, [ball_min]
+        movss xmm2, [ball_dx]
+        movss xmm12, [ball_dy]
+
+        ; x axis
         ucomiss xmm0, xmm1
-        ja .invert
+        ja .invertx
         ucomiss xmm0, xmm4
-        jae .move
-        .invert:
+        jae .movex
+        .invertx:
         mulss xmm2, [minus_one]
-        movss [circle_dx], xmm2
-        .move:
+        movss [ball_dx], xmm2
+        .movex:
         mulss xmm2, xmm14 ; ds = dv * dt
         addss xmm0, xmm2
-        movss [circle_x], xmm0
-        .done_update:   
+        movss [ball_x], xmm0
+
+        ; y axis
+        ucomiss xmm10, xmm1
+        ja .inverty
+        ucomiss xmm10, xmm4
+        jae .movey
+        .inverty:
+        mulss xmm12, [minus_one]
+        movss [ball_dy], xmm12
+        .movey:
+        mulss xmm12, xmm14 ; ds = dv * dt
+        addss xmm10, xmm12
+        movss [ball_y], xmm10
+
 
         ; render
         .render_image:
@@ -883,16 +902,12 @@ color_image:
 
 ; @param xmm0: x coord (normalized)
 ; @param xmm1: y coord (normalized)
-; @param xmm2: circle_x
-; @param xmm3: circle_y
-; @param xmm4: circle_ray
+; @param xmm2: ball_x
+; @param xmm3: ball_y
+; @param xmm4: ball_ray
 ; @return eax: rgb color
-circle_fragment:
-    ;movss xmm2, [circle_ray]
-    ;movss xmm3, [circle_x]
-    ;movss xmm4, [circle_y]
-
-    ; (x_coord - circle_x)^2 + (y_coord - circle_y)^2 < circle_ray^2
+ball_fragment:
+    ; (x_coord - ball_x)^2 + (y_coord - ball_y)^2 <= ball_ray^2
     mulss xmm4, xmm4 ; ray^2
     subss xmm0, xmm2
     mulss xmm0, xmm0 ; x^2
@@ -901,7 +916,35 @@ circle_fragment:
     addss xmm0, xmm1
     ucomiss xmm0, xmm4
     ja .black
-    mov eax, 0x00FF0000 ; red
+    mov eax, BALL_COLOR
+    jmp .done
+    .black:
+    mov eax, 0
+    .done:
+    ret
+
+; @param xmm0: x coord (normalized)
+; @param xmm1: y coord (normalized)
+; @param xmm2: pad_x
+; @param xmm3: pad_y
+; @param xmm4: pad_width
+; @param xmm5: pad_height
+; @return eax: rgb color
+pad_fragment:
+    ; if x >= pad_x and x < (pad_x + width) and y >= pad_y and y < (pad_y + height) 
+    ucomiss xmm0, xmm2
+    jb .black
+    addss xmm2, xmm4
+    ucomiss xmm0, xmm2
+    jae .black
+
+    ucomiss xmm1, xmm3
+    jb .black
+    addss xmm3, xmm5
+    ucomiss xmm1, xmm3
+    jae .black
+
+    mov eax, PAD_COLOR
     jmp .done
     .black:
     mov eax, 0
@@ -912,6 +955,11 @@ circle_fragment:
 ; @param esi: image width
 ; @param edx: image height
 render_game:
+    push rbp
+    mov rbp, rsp
+
+    sub rsp, 1024
+
     xor r8, r8 ; row index
     xor r9, r9 ; col index
 
@@ -921,10 +969,6 @@ render_game:
     cvtsi2ss xmm14, esi ; width
     cvtsi2ss xmm15, edx ; height
     movss xmm5, [max_rgb]
-    movss xmm6, [circle_ray]
-    movss xmm7, [circle_x]
-    movss xmm8, [circle_y]
-    movss xmm9, [one]
 
     .row_loop:
     cmp r8d, r13d
@@ -933,9 +977,11 @@ render_game:
     cmp r9d, r12d
     jge .next_row
 
+    movss xmm9, [one]
     ; u coord
     cvtsi2ss xmm2, r9
     divss xmm2, xmm14
+    movss [rsp], xmm2
 
     ; v coord
     cvtsi2ss xmm3, r8
@@ -943,15 +989,30 @@ render_game:
     movss xmm4, xmm3
     movss xmm3, xmm9
     subss xmm3, xmm4
+    movss [rsp + 4], xmm3
 
-    ; render circle
+    ; render ball
     movss xmm0, xmm2 ; u
     movss xmm1, xmm3 ; v
-    movss xmm2, xmm7 ; circle_x
-    movss xmm3, xmm8 ; circle_y
-    movss xmm4, xmm6 ; circle_ray
-    call circle_fragment
+    movss xmm2, [ball_x]
+    movss xmm3, [ball_y]
+    movss xmm4, [ball_ray]
+    call ball_fragment
+    cmp eax, 0
+    jne .color
 
+    ; render pad
+    movss xmm0, [rsp] ; u
+    movss xmm1, [rsp + 4] ; v
+    movss xmm2, [pad_x]
+    movss xmm3, [pad_y]
+    movss xmm4, [pad_width]
+    movss xmm5, [pad_height]
+    call pad_fragment
+    cmp eax, 0
+    jne .color
+
+    .color:
     mov r10d, eax ; rgb color
     
     ; calculate pointer offset
@@ -970,6 +1031,8 @@ render_game:
     jmp .row_loop
 
     .done:
+    add rsp, 1024
+    pop rbp
     ret
 
 ; @param rdi: pointer to image data
@@ -1146,16 +1209,20 @@ id_mask: dd 0
 
 root_visual_id: dd 0
 
-ball_x: dd 0.0
-ball_y: dd 0.0
-ball_offset: dd 0.1
+; ball
+ball_ray: dd 0.012
+ball_min: dd 0.012 ; ray
+ball_max: dd 0.988 ; 1 - ray
+ball_x: dd 0.05
+ball_y: dd 0.8
+ball_dx: dd 0.4
+ball_dy: dd 0.5
 
-circle_ray: dd 0.05
-circle_x: dd 0.05
-circle_y: dd 0.5
-circle_min_x: dd 0.05
-circle_max_x: dd 0.95
-circle_dx: dd 0.5
+; pad
+pad_x: dd 0.5
+pad_y: dd 0.1
+pad_width: dd 0.15
+pad_height: dd 0.025
 
 max_rgb: dd 255.0 
 one: dd 1.0
@@ -1173,3 +1240,4 @@ timespec:
 image:
     resb WINDOW_SIZE
 
+; TODO: cap framerate to 60 fps (nanosleep)
