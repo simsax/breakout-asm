@@ -3,8 +3,8 @@
 %define STDERR 2
 %define AF_UNIX 1
 %define SOCK_STREAM 1
-
-; syscalls
+%define KEYCODE_LEFT 113
+%define KEYCODE_RIGHT 114
 %define SYS_READ 0
 %define SYS_WRITE 1
 %define SYS_POLL 7
@@ -146,6 +146,11 @@ static x11_send_handshake:function
     mov al, byte [rsp + 21]; Number of formats (n).
     movzx rax, al ; Fill the rest of the register with zeroes to avoid garbage values.
     imul rax, 8 ; sizeof(format) == 8
+
+    ;mov dl, byte [rsp + 26]
+    ;mov byte [min_keycode], dl
+    ;mov dl, byte [rsp + 27]
+    ;mov byte [max_keycode], dl
 
     add rdi, 32 ; Skip the connection setup
     add rdi, rcx ; Skip over the vendor information (v).
@@ -289,11 +294,12 @@ static x11_create_window:function
     push rbp
     mov rbp, rsp
 
-    %define X11_OP_REQ_CREATE_WINDOW 0x01
-    %define X11_FLAG_WIN_BG_COLOR 0x00000002
-    %define X11_EVENT_FLAG_KEY_RELEASE 0x0002
-    %define X11_EVENT_FLAG_EXPOSURE 0x8000
-    %define X11_FLAG_WIN_EVENT 0x00000800
+    %define X11_OP_REQ_CREATE_WINDOW   0x01
+    %define X11_FLAG_WIN_BG_COLOR      0x00000002
+    %define X11_EVENT_FLAG_KEY_PRESS   0x00000001
+    %define X11_EVENT_FLAG_KEY_RELEASE 0x00000002
+    %define X11_EVENT_FLAG_EXPOSURE    0x00008000
+    %define X11_FLAG_WIN_EVENT         0x00000800
     
     %define CREATE_WINDOW_FLAG_COUNT 2
     %define CREATE_WINDOW_PACKET_U32_COUNT (8 + CREATE_WINDOW_FLAG_COUNT)
@@ -311,8 +317,7 @@ static x11_create_window:function
     mov dword [rsp + 6*4], ecx
     mov dword [rsp + 7*4], X11_FLAG_WIN_BG_COLOR | X11_FLAG_WIN_EVENT
     mov dword [rsp + 8*4], 0
-    mov dword [rsp + 9*4], X11_EVENT_FLAG_KEY_RELEASE | X11_EVENT_FLAG_EXPOSURE
-
+    mov dword [rsp + 9*4], X11_EVENT_FLAG_EXPOSURE | X11_EVENT_FLAG_KEY_RELEASE | X11_EVENT_FLAG_KEY_PRESS
 
     mov rax, SYS_WRITE
     mov rdi, rdi
@@ -492,14 +497,19 @@ static poll_messages:function
         mov rdi, [rsp + 0*4]
         call x11_read_reply
 
-        %define X11_EVENT_EXPOSURE 0xc
-        cmp eax, X11_EVENT_EXPOSURE
-        jnz .received_other_event
-        .received_exposed_event:
-        mov byte [rsp + 24], 1 ; Mark as exposed.
-        .received_other_event:
-        cmp byte [rsp + 24], 1 ; exposed
-        jnz .loop
+        %define X11_EVENT_KEY_PRESS 0x2
+        cmp eax, X11_EVENT_KEY_PRESS
+        jnz .update
+
+        ; KEYPRESS EVENT
+        mov sil, byte [rsp - 31] ; sil has the keycode (probably wrong here)
+        ; directly use the keycode instead of keysym for simplicity
+        cmp sil, KEYCODE_LEFT
+        jnz .key_right
+        lea rdi, [pressed]
+        call println
+
+        .key_right:
 
         .update:
         call update_current_time
@@ -847,6 +857,38 @@ static x11_big_req_enable:function
     pop rbp
     ret
 
+;; Retrieves keysym associated with given keycode
+;; @param rdi The socket file descriptor
+;; @param rsi The keycode
+;x11_keycode_to_keysym:
+;static x11_big_req_enable:function
+;    push rbp
+;    mov rbp, rsp
+;    sub rsp, 16
+;
+;    %define X11_OP_GET_KEYBOARD_MAPPING 101
+;
+;    mov dword [rsp], X11_OP_GET_KEYBOARD_MAPPING | (2 << 16)
+;    mov dword [rsp + 4], 1
+;    shl dword [rsp + 4], 8
+;    or byte [rsp + 4], sil
+;
+;    mov rdx, 8
+;    .write:
+;    mov rax, SYS_WRITE
+;    lea rsi, [rsp]
+;    syscall
+;
+;    cmp rax, EAGAIN
+;    je .write
+;
+;    cmp rax, rdx
+;    jnz die
+;
+;    add rsp, 16
+;    pop rbp
+;    ret
+;
 
 ; @param rdi: pointer to string
 strlen:
@@ -878,7 +920,7 @@ print:
 println:
     ; void println(char* msg);
     call print
-    mov rdi, [newline]
+    lea rdi, [newline]
     call print
     ret
 
@@ -1194,19 +1236,15 @@ _start:
 section .data
 
 newline: dd 10
+pressed: db "Pressed!", 0
 
 sun_path: db "/tmp/.X11-unix/X0", 0
 
 big_req_ext_name: db "BIG-REQUESTS"
-
 big_req_ext_len: dd 12
-
 id: dd 0
-
 id_base: dd 0
-
 id_mask: dd 0
-
 root_visual_id: dd 0
 
 ; ball
