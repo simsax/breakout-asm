@@ -420,7 +420,6 @@ static x11_read_reply:function
     mov al, byte [rsp]
 
     add rsp, 32
-
     pop rbp
     ret
 
@@ -502,14 +501,17 @@ static poll_messages:function
         jnz .update
 
         ; KEYPRESS EVENT
-        mov sil, byte [rsp - 31] ; sil has the keycode (probably wrong here)
-        ; directly use the keycode instead of keysym for simplicity
+        mov sil, byte [rsp - 16 - 31] ; directly use the keycode instead of keysym for simplicity
         cmp sil, KEYCODE_LEFT
         jnz .key_right
-        lea rdi, [pressed]
+        lea rdi, [left]
         call println
 
         .key_right:
+        cmp sil, KEYCODE_RIGHT
+        jnz .update
+        lea rdi, [right]
+        call println
 
         .update:
         call update_current_time
@@ -698,6 +700,25 @@ static x11_clear_window:function
     pop rbp
     ret
 
+int_to_ascii:
+    ; functions that converts unsigned integer to ascii
+    ; returns pointer to beginning of the string
+    mov r8, buffer_end - 1 ; last byte should be 0 for a null terminated string
+    xor rax, rax
+    mov eax, edi
+    mov r9, 10
+.loop:
+    xor edx, edx
+    dec r8
+    div r9 ; eax quotient, edx reminder
+    add edx, '0' ; convert reminder to ASCII
+    mov [r8], dl
+    test eax, eax
+    jz .done
+    jmp .loop
+.done:
+    mov rax, r8
+    ret
 
 
 ; Put image in a X11 window, using extended length protocol (this one is by me)
@@ -1237,6 +1258,8 @@ section .data
 
 newline: dd 10
 pressed: db "Pressed!", 0
+left: db "Left!", 0
+right: db "Right!", 0
 
 sun_path: db "/tmp/.X11-unix/X0", 0
 
@@ -1277,5 +1300,10 @@ timespec:
 
 image:
     resb WINDOW_SIZE
+
+; general purpose buffer
+buffer:
+    resb 256
+buffer_end:
 
 ; TODO: cap framerate to 60 fps (nanosleep)
