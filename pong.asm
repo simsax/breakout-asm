@@ -497,21 +497,68 @@ static poll_messages:function
         call x11_read_reply
 
         %define X11_EVENT_KEY_PRESS 0x2
+        %define X11_EVENT_KEY_RELEASE 0x3
         cmp eax, X11_EVENT_KEY_PRESS
-        jnz .update
+        jnz .key_release
 
         ; KEYPRESS EVENT
         mov sil, byte [rsp - 16 - 31] ; directly use the keycode instead of keysym for simplicity
         cmp sil, KEYCODE_LEFT
-        jnz .key_right
-        lea rdi, [left]
+        jnz .keypress_right
+        ; left press
+        lea rdi, [leftp]
         call println
+        mov byte [rsp + 12], KEYCODE_LEFT
+        jmp .update
 
-        .key_right:
+        .keypress_right:
         cmp sil, KEYCODE_RIGHT
         jnz .update
-        lea rdi, [right]
+        ; right press
+        lea rdi, [rightp]
         call println
+        mov byte [rsp + 12], KEYCODE_RIGHT
+        jmp .update
+
+        .key_release:
+        cmp eax, X11_EVENT_KEY_RELEASE
+        jnz .update
+
+        ; KEYRELEASE EVENT
+        mov r15b, byte [rsp - 16 - 31] ; keycode
+        mov r10w, word [rsp - 16 - 30] ; sequence number
+
+        ; handle x11 auto-repeat issue (https://wiki.tcl-lang.org/page/Disable+autorepeat+under+X11)
+        ; check if there is a keypress event right after release event that has the same sequence id
+        mov rax, SYS_POLL
+        lea rdi, [rsp]
+        mov rsi, 1
+        mov rdx, POLL_TIMEOUT
+        syscall
+
+        cmp rax, 0
+        je .keyrelease_left
+        jl die
+
+        mov rdi, [rsp]
+        call x11_read_reply
+        cmp eax, X11_EVENT_KEY_PRESS
+        jnz .keyrelease_left
+        mov r11w, word [rsp - 16 - 30]
+        cmp r10w, r11w ; check if this key-press has same sequence number as previous release
+        jz .update ; fake release, ignore
+
+        .keyrelease_left:
+        cmp r15b, KEYCODE_LEFT
+        jnz .keyrelease_right
+        ; left release
+        jmp .update
+
+        .keyrelease_right:
+        cmp r15b, KEYCODE_RIGHT
+        jnz .update
+        ; right release
+        jmp .update
 
         .update:
         call update_current_time
@@ -1257,9 +1304,6 @@ _start:
 section .data
 
 newline: dd 10
-pressed: db "Pressed!", 0
-left: db "Left!", 0
-right: db "Right!", 0
 
 sun_path: db "/tmp/.X11-unix/X0", 0
 
