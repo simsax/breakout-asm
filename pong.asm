@@ -462,7 +462,7 @@ static poll_messages:function
     push rbp
     mov rbp, rsp
 
-    sub rsp, 32
+    sub rsp, 64
 
     %define POLLIN 0x001
     %define POLLPRI 0x002
@@ -475,6 +475,9 @@ static poll_messages:function
     mov dword [rsp + 1*4], POLLIN
     mov dword [rsp + 16], esi ; window id
     mov dword [rsp + 20], edx ; gc id
+
+    mov byte [rsp + 24], 0 ; moving left
+    mov byte [rsp + 25], 0 ; moving right
 
     .loop:
         mov rax, SYS_POLL
@@ -506,18 +509,16 @@ static poll_messages:function
         cmp sil, KEYCODE_LEFT
         jnz .keypress_right
         ; left press
-        lea rdi, [leftp]
-        call println
-        mov byte [rsp + 12], KEYCODE_LEFT
+        mov byte [rsp + 24], 1
+        ;mov byte [rsp + 12], KEYCODE_LEFT
         jmp .update
 
         .keypress_right:
         cmp sil, KEYCODE_RIGHT
         jnz .update
         ; right press
-        lea rdi, [rightp]
-        call println
-        mov byte [rsp + 12], KEYCODE_RIGHT
+        mov byte [rsp + 25], 1
+        ;mov byte [rsp + 12], KEYCODE_RIGHT
         jmp .update
 
         .key_release:
@@ -552,15 +553,18 @@ static poll_messages:function
         cmp r15b, KEYCODE_LEFT
         jnz .keyrelease_right
         ; left release
+        mov byte [rsp + 24], 0
         jmp .update
 
         .keyrelease_right:
         cmp r15b, KEYCODE_RIGHT
         jnz .update
         ; right release
+        mov byte [rsp + 25], 0
         jmp .update
 
         .update:
+        ; calculate delta time for current frame
         call update_current_time
         movsd xmm14, [cur_time]
         movsd xmm15, [prev_time]
@@ -569,7 +573,32 @@ static poll_messages:function
         ; prev_time = cur_time
         movsd xmm15, [cur_time]
         movsd [prev_time], xmm15
-        
+
+        ; update pad
+        movss xmm0, [pad_x]
+        movss xmm1, [pad_dx]
+
+        mov al, byte [rsp + 24]
+        test al, al
+        jz .pad_move_right
+        ; move left
+        mulss xmm1, xmm14
+        subss xmm0, xmm1
+        movss [pad_x], xmm0
+
+        .pad_move_right:
+        mov al, byte [rsp + 25]
+        test al, al
+        jz .update_ball
+        ; move right
+        mulss xmm1, xmm14
+        addss xmm0, xmm1
+        movss [pad_x], xmm0
+
+        ; TODO: fix movement when both are pressed
+
+
+        .update_ball:
         movss xmm0, [ball_x]
         movss xmm10, [ball_y]
         movss xmm1, [ball_max]
@@ -628,7 +657,7 @@ static poll_messages:function
 
         jmp .loop
 
-    add rsp, 32
+    add rsp, 64
     pop rbp
     ret
 
@@ -1325,6 +1354,7 @@ ball_dy: dd 0.5
 
 ; pad
 pad_x: dd 0.5
+pad_dx: dd 0.5
 pad_y: dd 0.1
 pad_width: dd 0.15
 pad_height: dd 0.025
