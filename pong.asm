@@ -16,12 +16,14 @@
 %define EAGAIN -11
 %define POLL_TIMEOUT 0
 
-; graphics constants
 %define WINDOW_W 800
 %define WINDOW_H 800
 %define WINDOW_SIZE (WINDOW_W * WINDOW_H * 4) ; BGRX format
 %define BALL_COLOR 0x00FF0000 ; red
 %define PAD_COLOR 0x000000FF ; blue
+%define GREEN_BRICKS_COLOR 0x0000FF00
+%define BORDER_BRICKS_COLOR 0
+%define NUM_BRICKS 16
 
 global _start
 section .text
@@ -577,26 +579,34 @@ static poll_messages:function
         ; update pad
         movss xmm0, [pad_x]
         movss xmm1, [pad_dx]
+        movss xmm2, [pad_min]
+        movss xmm3, [pad_max]
 
         mov al, byte [rsp + 24]
+        mov cl, byte [rsp + 25]
+        cmp al, cl
+        ; when both are pressed you can stay still
+        jz .update_ball 
+
         test al, al
         jz .pad_move_right
         ; move left
+        ucomiss xmm0, xmm2
+        jb .update_ball
         mulss xmm1, xmm14
         subss xmm0, xmm1
         movss [pad_x], xmm0
+        jmp .update_ball
 
         .pad_move_right:
-        mov al, byte [rsp + 25]
-        test al, al
+        test cl, cl
         jz .update_ball
         ; move right
+        ucomiss xmm0, xmm3
+        jae .update_ball
         mulss xmm1, xmm14
         addss xmm0, xmm1
         movss [pad_x], xmm0
-
-        ; TODO: fix movement when both are pressed
-
 
         .update_ball:
         movss xmm0, [ball_x]
@@ -605,7 +615,26 @@ static poll_messages:function
         movss xmm4, [ball_min]
         movss xmm2, [ball_dx]
         movss xmm12, [ball_dy]
+        movss xmm5, [pad_x]
+        movss xmm6, [pad_y]
+        movss xmm8, [pad_height]
+        movss xmm9, [pad_width]
+        addss xmm6, xmm8 ; top of pad
+        movss xmm7, xmm10
+        subss xmm7, xmm4 ; bottom of ball
+        addss xmm9, xmm5 ; pad right
 
+        ; pad
+        ucomiss xmm12, [zero]
+        ja .walls_collision ; skip pad collision if going up
+        ucomiss xmm7, xmm6
+        ja .walls_collision
+        ucomiss xmm0, xmm5
+        jb .walls_collision
+        ucomiss xmm0, xmm9
+        jb .inverty
+
+        .walls_collision:
         ; x axis
         ucomiss xmm0, xmm1
         ja .invertx
@@ -631,7 +660,6 @@ static poll_messages:function
         mulss xmm12, xmm14 ; ds = dv * dt
         addss xmm10, xmm12
         movss [ball_y], xmm10
-
 
         ; render
         .render_image:
@@ -861,7 +889,6 @@ static x11_put_image:function
 
     cmp rax, rdx
     jz .done
-    ; forgetting this check costed me several hours of debugging
     cmp rax, EAGAIN
     je .write
     add r10, rax ; increment image data pointer by number of bytes written
@@ -954,39 +981,6 @@ static x11_big_req_enable:function
     pop rbp
     ret
 
-;; Retrieves keysym associated with given keycode
-;; @param rdi The socket file descriptor
-;; @param rsi The keycode
-;x11_keycode_to_keysym:
-;static x11_big_req_enable:function
-;    push rbp
-;    mov rbp, rsp
-;    sub rsp, 16
-;
-;    %define X11_OP_GET_KEYBOARD_MAPPING 101
-;
-;    mov dword [rsp], X11_OP_GET_KEYBOARD_MAPPING | (2 << 16)
-;    mov dword [rsp + 4], 1
-;    shl dword [rsp + 4], 8
-;    or byte [rsp + 4], sil
-;
-;    mov rdx, 8
-;    .write:
-;    mov rax, SYS_WRITE
-;    lea rsi, [rsp]
-;    syscall
-;
-;    cmp rax, EAGAIN
-;    je .write
-;
-;    cmp rax, rdx
-;    jnz die
-;
-;    add rsp, 16
-;    pop rbp
-;    ret
-;
-
 ; @param rdi: pointer to string
 strlen:
     ; size_t strlen(const char* s);
@@ -1041,11 +1035,12 @@ color_image:
 
 ; @param xmm0: x coord (normalized)
 ; @param xmm1: y coord (normalized)
-; @param xmm2: ball_x
-; @param xmm3: ball_y
-; @param xmm4: ball_ray
 ; @return eax: rgb color
 ball_fragment:
+    movss xmm2, [ball_x]
+    movss xmm3, [ball_y]
+    movss xmm4, [ball_ray]
+
     ; (x_coord - ball_x)^2 + (y_coord - ball_y)^2 <= ball_ray^2
     mulss xmm4, xmm4 ; ray^2
     subss xmm0, xmm2
@@ -1064,12 +1059,13 @@ ball_fragment:
 
 ; @param xmm0: x coord (normalized)
 ; @param xmm1: y coord (normalized)
-; @param xmm2: pad_x
-; @param xmm3: pad_y
-; @param xmm4: pad_width
-; @param xmm5: pad_height
 ; @return eax: rgb color
 pad_fragment:
+    movss xmm2, [pad_x]
+    movss xmm3, [pad_y]
+    movss xmm4, [pad_width]
+    movss xmm5, [pad_height]
+
     ; if x >= pad_x and x < (pad_x + width) and y >= pad_y and y < (pad_y + height) 
     ucomiss xmm0, xmm2
     jb .black
@@ -1090,6 +1086,75 @@ pad_fragment:
     .done:
     ret
 
+; @param xmm0: x coord (normalized)
+; @param xmm1: y coord (normalized)
+; @return eax: rgb color
+bricks_fragment:
+    lea rdi, [green_bricks]
+    mov rsi, NUM_BRICKS
+    movss xmm2, [bricks_height]
+    movss xmm3, [green_bricks_y]
+
+    ; if y >= y_brick and y < y_brick + bricks height
+    ucomiss xmm1, xmm3
+    jb .black
+    addss xmm3, xmm2
+    ucomiss xmm1, xmm3
+    jae .black
+
+    ; find index of brick
+    cvtsi2ss xmm4, rsi ; num bricks
+    mulss xmm4, xmm0
+    cvtss2si rcx, xmm4 ; round index to int
+    cvtsi2ss xmm5, rcx
+    ucomiss xmm5, xmm4
+    jbe .next
+    subss xmm5, [one] ; floor
+    .next:
+    ; xmm5 has the index
+    cvtss2si rcx, xmm5
+    ; check if brick exists
+    mov dil, byte [green_bricks + rcx]
+    test dil, dil
+    jz .black
+    ; check if point is in bricks border
+    movss xmm10, [bricks_border]
+    cvtsi2ss xmm4, rsi
+    movss xmm6, [one]
+    divss xmm6, xmm4 ; width of brick
+    mulss xmm5, xmm6 ; brick_x
+    ; x < (brick_x + border) or x >= (brick_x + width - border)
+    movss xmm11, xmm5
+    addss xmm11, xmm10
+    ucomiss xmm0, xmm11
+    jb .border
+    movss xmm11, xmm5
+    addss xmm11, xmm6
+    subss xmm11, xmm10
+    ucomiss xmm0, xmm11
+    jae .border
+    movss xmm2, [bricks_height]
+    movss xmm3, [green_bricks_y]
+    ; y < (brick_y + border) or y >= (brick_y + height - border)
+    movss xmm11, xmm3
+    addss xmm11, xmm10
+    ucomiss xmm1, xmm11
+    jb .border
+    movss xmm11, xmm3
+    addss xmm11, xmm2
+    subss xmm11, xmm10
+    ucomiss xmm1, xmm11
+    jae .border
+    mov eax, GREEN_BRICKS_COLOR
+    jmp .done
+    .border:
+    mov eax, BORDER_BRICKS_COLOR
+    jmp .done
+    .black:
+    mov eax, 0
+    .done:
+    ret
+
 ; @param rdi: pointer to image data
 ; @param esi: image width
 ; @param edx: image height
@@ -1098,6 +1163,8 @@ render_game:
     mov rbp, rsp
 
     sub rsp, 1024
+
+    mov qword [rsp], rdi
 
     xor r8, r8 ; row index
     xor r9, r9 ; col index
@@ -1120,7 +1187,7 @@ render_game:
     ; u coord
     cvtsi2ss xmm2, r9
     divss xmm2, xmm14
-    movss [rsp], xmm2
+    movss [rsp + 8], xmm2
 
     ; v coord
     cvtsi2ss xmm3, r8
@@ -1128,26 +1195,26 @@ render_game:
     movss xmm4, xmm3
     movss xmm3, xmm9
     subss xmm3, xmm4
-    movss [rsp + 4], xmm3
+    movss [rsp + 12], xmm3
 
     ; render ball
     movss xmm0, xmm2 ; u
     movss xmm1, xmm3 ; v
-    movss xmm2, [ball_x]
-    movss xmm3, [ball_y]
-    movss xmm4, [ball_ray]
     call ball_fragment
     cmp eax, 0
     jne .color
 
     ; render pad
-    movss xmm0, [rsp] ; u
-    movss xmm1, [rsp + 4] ; v
-    movss xmm2, [pad_x]
-    movss xmm3, [pad_y]
-    movss xmm4, [pad_width]
-    movss xmm5, [pad_height]
+    movss xmm0, [rsp + 8] ; u
+    movss xmm1, [rsp + 12] ; v
     call pad_fragment
+    cmp eax, 0
+    jne .color
+
+    ; render bricks
+    movss xmm0, [rsp + 8]
+    movss xmm1, [rsp + 12]
+    call bricks_fragment
     cmp eax, 0
     jne .color
 
@@ -1160,6 +1227,7 @@ render_game:
     add eax, r9d
     imul eax, 4
     
+    mov rdi, [rsp]
     mov dword [rdi + rax], r10d
 
     inc r9
@@ -1174,65 +1242,6 @@ render_game:
     pop rbp
     ret
 
-; @param rdi: pointer to image data
-; @param esi: image width
-; @param edx: image height
-uv_pattern:
-    xor r8, r8 ; row index
-    xor r9, r9 ; col index
-
-    mov r12d, esi 
-    mov r13d, edx
-        
-    cvtsi2ss xmm14, esi ; width
-    cvtsi2ss xmm15, edx ; height
-    movss xmm5, [max_rgb]
-
-    .row_loop:
-    cmp r8d, r13d
-    jge .done
-    .col_loop:
-    cmp r9d, r12d
-    jge .next_row
-
-    ; u coord
-    cvtsi2ss xmm2, r9
-    divss xmm2, xmm14
-
-    ; v coord
-    cvtsi2ss xmm3, r8
-    divss xmm3, xmm15
-    movss xmm4, xmm3
-    movss xmm3, [one]
-    subss xmm3, xmm4
-
-    ; convert them to int [0..255]
-    mulss xmm2, xmm5
-    mulss xmm3, xmm5
-    cvtss2si r10d, xmm2
-    cvtss2si r11d, xmm3
-
-    shl r10d, 16
-    shl r11d, 8
-    or r10d, r11d ; rgb color
-    
-    ; calculate pointer offset
-    mov eax, r8d
-    mul r12d
-    add eax, r9d
-    imul eax, 4
-    
-    mov dword [rdi + rax], r10d
-
-    inc r9
-    jmp .col_loop
-    .next_row:
-    xor r9, r9
-    inc r8
-    jmp .row_loop
-
-    .done:
-    ret
 
 ; updates [cur_time] with the current time
 update_current_time:
@@ -1252,12 +1261,6 @@ update_current_time:
     ret
 
 _start:
-    ; try to print uv pattern
-    lea rdi, [image]
-    mov esi, WINDOW_W
-    mov edx, WINDOW_H
-    call uv_pattern
-
     call x11_connect_to_server
     mov r15, rax ; Store the socket file descriptor in r15.
 
@@ -1321,6 +1324,12 @@ _start:
     movsd xmm0, [cur_time]
     movsd [prev_time], xmm0
 
+    ; init bricks
+    lea rdi, [green_bricks]
+    mov rsi, 1
+    mov rdx, NUM_BRICKS
+    call memset_byte
+
     mov rdi, r15 ; socket fd
     mov esi, ebx ; window id
     mov edx, r13d ; gc id
@@ -1345,22 +1354,30 @@ root_visual_id: dd 0
 
 ; ball
 ball_ray: dd 0.012
-ball_min: dd 0.012 ; ray
-ball_max: dd 0.988 ; 1 - ray
+ball_min: equ ball_ray
+ball_max: dd 0.988 ; 1 - ball_ray
 ball_x: dd 0.05
 ball_y: dd 0.8
-ball_dx: dd 0.4
+ball_dx: dd 0.5
 ball_dy: dd 0.5
 
 ; pad
 pad_x: dd 0.5
-pad_dx: dd 0.5
+pad_dx: dd 1.0
 pad_y: dd 0.1
 pad_width: dd 0.15
 pad_height: dd 0.025
+pad_min: dd 0.0
+pad_max: dd 0.85 ; 1 - pad_width
+
+; bricks
+bricks_height: dd 0.025
+green_bricks_y: dd 0.5
+bricks_border: dd 0.0045
 
 max_rgb: dd 255.0 
 one: dd 1.0
+zero: dd 0.0
 minus_one: dd -1.0
 
 cur_time: dq 0.0
@@ -1374,6 +1391,9 @@ timespec:
 
 image:
     resb WINDOW_SIZE
+
+green_bricks:
+    resb NUM_BRICKS
 
 ; general purpose buffer
 buffer:
