@@ -21,7 +21,11 @@
 %define WINDOW_SIZE (WINDOW_W * WINDOW_H * 4) ; BGRX format
 %define BALL_COLOR 0x00FF0000 ; red
 %define PAD_COLOR 0x000000FF ; blue
-%define GREEN_BRICKS_COLOR 0x0000FF00
+%define BLUE_BRICKS_COLOR   0x000000FF
+%define GREEN_BRICKS_COLOR  0x0000FF00
+%define YELLOW_BRICKS_COLOR 0x00FFFF00
+%define ORANGE_BRICKS_COLOR 0x00FF8800
+%define RED_BRICKS_COLOR    0x00FF0000
 %define BORDER_BRICKS_COLOR 0
 %define NUM_BRICKS 16
 
@@ -1090,18 +1094,65 @@ pad_fragment:
 ; @param xmm1: y coord (normalized)
 ; @return eax: rgb color
 bricks_fragment:
-    lea rdi, [green_bricks]
     mov rsi, NUM_BRICKS
-    movss xmm2, [bricks_height]
+    movss xmm2, [blue_bricks_y]
     movss xmm3, [green_bricks_y]
+    movss xmm4, [yellow_bricks_y]
+    movss xmm5, [orange_bricks_y]
+    movss xmm6, [red_bricks_y]
+    movss xmm7, [bricks_height]
+
+    ; find which row of bricks this pixel belongs to
 
     ; if y >= y_brick and y < y_brick + bricks height
-    ucomiss xmm1, xmm3
+    .blue:
+    ucomiss xmm1, xmm2
     jb .black
-    addss xmm3, xmm2
-    ucomiss xmm1, xmm3
-    jae .black
+    addss xmm2, xmm7
+    ucomiss xmm1, xmm2
+    jae .green
+    lea r10, [blue_bricks]
+    movss xmm3, [blue_bricks_y]
+    mov eax, BLUE_BRICKS_COLOR
+    jmp .draw_brick
 
+    .green:
+    addss xmm3, xmm7
+    ucomiss xmm1, xmm3
+    jae .yellow
+    lea r10, [green_bricks]
+    movss xmm3, [green_bricks_y]
+    mov eax, GREEN_BRICKS_COLOR
+    jmp .draw_brick
+
+    .yellow:
+    addss xmm4, xmm7
+    ucomiss xmm1, xmm4
+    jae .orange
+    lea r10, [yellow_bricks]
+    movss xmm3, [yellow_bricks_y]
+    mov eax, YELLOW_BRICKS_COLOR
+    jmp .draw_brick
+
+    .orange:
+    addss xmm5, xmm7
+    ucomiss xmm1, xmm5
+    jae .red
+    lea r10, [orange_bricks]
+    movss xmm3, [orange_bricks_y]
+    mov eax, ORANGE_BRICKS_COLOR
+    jmp .draw_brick
+
+    .red:
+    addss xmm6, xmm7
+    ucomiss xmm1, xmm6
+    jae .black
+    lea r10, [red_bricks]
+    movss xmm3, [red_bricks_y]
+    mov eax, RED_BRICKS_COLOR
+    jmp .draw_brick
+
+    .draw_brick:
     ; find index of brick
     cvtsi2ss xmm4, rsi ; num bricks
     mulss xmm4, xmm0
@@ -1114,7 +1165,7 @@ bricks_fragment:
     ; xmm5 has the index
     cvtss2si rcx, xmm5
     ; check if brick exists
-    mov dil, byte [green_bricks + rcx]
+    mov dil, byte [r10 + rcx]
     test dil, dil
     jz .black
     ; check if point is in bricks border
@@ -1134,9 +1185,8 @@ bricks_fragment:
     ucomiss xmm0, xmm11
     jae .border
     movss xmm2, [bricks_height]
-    movss xmm3, [green_bricks_y]
     ; y < (brick_y + border) or y >= (brick_y + height - border)
-    movss xmm11, xmm3
+    movss xmm11, xmm3 ; brick_y
     addss xmm11, xmm10
     ucomiss xmm1, xmm11
     jb .border
@@ -1145,7 +1195,6 @@ bricks_fragment:
     subss xmm11, xmm10
     ucomiss xmm1, xmm11
     jae .border
-    mov eax, GREEN_BRICKS_COLOR
     jmp .done
     .border:
     mov eax, BORDER_BRICKS_COLOR
@@ -1325,7 +1374,27 @@ _start:
     movsd [prev_time], xmm0
 
     ; init bricks
+    lea rdi, [blue_bricks]
+    mov rsi, 1
+    mov rdx, NUM_BRICKS
+    call memset_byte
+
     lea rdi, [green_bricks]
+    mov rsi, 1
+    mov rdx, NUM_BRICKS
+    call memset_byte
+
+    lea rdi, [yellow_bricks]
+    mov rsi, 1
+    mov rdx, NUM_BRICKS
+    call memset_byte
+
+    lea rdi, [orange_bricks]
+    mov rsi, 1
+    mov rdx, NUM_BRICKS
+    call memset_byte
+
+    lea rdi, [red_bricks]
     mov rsi, 1
     mov rdx, NUM_BRICKS
     call memset_byte
@@ -1372,8 +1441,13 @@ pad_max: dd 0.85 ; 1 - pad_width
 
 ; bricks
 bricks_height: dd 0.025
-green_bricks_y: dd 0.5
-bricks_border: dd 0.0045
+blue_bricks_y: dd 0.5
+green_bricks_y: dd 0.525
+yellow_bricks_y: dd 0.550
+orange_bricks_y: dd 0.575
+red_bricks_y: dd 0.6
+bricks_border: dd 0.0024
+;bricks_border: dd 0.0045
 
 max_rgb: dd 255.0 
 one: dd 1.0
@@ -1386,14 +1460,15 @@ one_billion: dq 1000000000.0
 
 section .bss
 
-timespec:
-    resb 16
+timespec: resb 16
 
-image:
-    resb WINDOW_SIZE
+image: resb WINDOW_SIZE
 
-green_bricks:
-    resb NUM_BRICKS
+blue_bricks: resb NUM_BRICKS
+green_bricks: resb NUM_BRICKS
+yellow_bricks: resb NUM_BRICKS
+orange_bricks: resb NUM_BRICKS
+red_bricks: resb NUM_BRICKS
 
 ; general purpose buffer
 buffer:
