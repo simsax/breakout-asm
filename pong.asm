@@ -580,6 +580,8 @@ static poll_messages:function
         movsd xmm15, [cur_time]
         movsd [prev_time], xmm15
 
+        movd [rsp + 60], xmm14
+
         ; update pad
         movss xmm0, [pad_x]
         movss xmm1, [pad_dx]
@@ -704,8 +706,11 @@ static poll_messages:function
         lea rdi, [red_bricks]
         call collide_row
 
+        movd xmm14, [rsp + 60]
+
         .walls_collision:
         movss xmm2, [ball_dx]
+        movss xmm12, [ball_dy]
         movss xmm1, [ball_max]
         movss xmm4, [ball_min] ; == ball ray
         ; x axis
@@ -722,6 +727,7 @@ static poll_messages:function
         movss [ball_x], xmm0
 
         ; y axis
+        movss xmm10, [ball_y]
         ucomiss xmm10, xmm1
         ja .inverty
         ucomiss xmm10, xmm4
@@ -1274,6 +1280,8 @@ bricks_fragment:
     ret
 
 ; @param rdi: pointer to bricks row
+; @param xmm15: top_bricks_y
+; @param xmm11: bricks_height
 collide_row:
     push rbp
     mov rbp, rsp
@@ -1326,26 +1334,104 @@ collide_row:
     cvtss2si rcx, xmm5
     cvtss2si rdx, xmm6
 
-    mov [rsp], rdi
-    mov [rsp + 8], rcx
-    mov [rsp + 16], rdx
+    ; debug
+    ;mov [rsp], rdi
+    ;mov [rsp + 8], rcx
+    ;mov [rsp + 16], rdx
 
-    mov rdi, rcx
-    call int_to_ascii
-    mov rdi, rax
-    call println
+    ;mov rdi, rcx
+    ;call int_to_ascii
+    ;mov rdi, rax
+    ;call println
+    ;
+    ;mov rdi, [rsp + 16]
+    ;call int_to_ascii
+    ;mov rdi, rax
+    ;call println
+    
+    ;mov rdi, [rsp]
+    ;mov rcx, [rsp + 8]
+    ;mov rdx, [rsp + 16]
 
-    mov rdi, [rsp + 16]
-    call int_to_ascii
-    mov rdi, rax
-    call println
-
-    mov rdi, [rsp]
-    mov rcx, [rsp + 8]
-    mov rdx, [rsp + 16]
+    movss xmm13, [one]
+    mov r8d, NUM_BRICKS
+    cvtsi2ss xmm12, r8d
+    divss xmm13, xmm12 ; xmm13 = bricks width
     
     .brick_loop: 
-    mov byte [rdi + rcx], 0
+    mov al, byte [rdi + rcx]
+    test al, al
+    jz .continue
+    ; collision
+    mov byte [rdi + rcx], 0 ; destroy brick
+
+    ; check which side is colliding, reverse velocity depending on the side
+    ; min(
+    ;    dist(ball_y, brick_top),
+    ;    dist(ball_y, brick_bottom),
+    ;    dist(ball_x, brick_left),
+    ;    dist(ball_x, brick_right),
+    ;)
+
+    movd xmm10, [sign_bit_mask]
+    movss xmm7, [ball_y]
+    subss xmm7, xmm15
+    ; abs (set sign bit to 0)
+    andps xmm7, xmm10 ; xmm7 = dist(ball_y, brick_top)
+    movss xmm8, [ball_y]
+    subss xmm15, xmm11
+    subss xmm8, xmm15
+    andps xmm8, xmm10 ; xmm8 = dist(ball_y, brick_bottom)
+
+    movss xmm9, [ball_x]
+    ; get left and right border of this brick, using index and width
+    cvtsi2ss xmm5, rcx ; index of brick
+    mulss xmm5, xmm13 ; brick_left
+    movss xmm14, xmm5
+    addss xmm14, xmm13 ; brick_right
+    subss xmm5, xmm9
+    andps xmm5, xmm10 ; xmm5 = dist(ball_x, brick_left)
+    subss xmm14, xmm9
+    andps xmm14, xmm10 ; xmm14 = dist(ball_x, brick_right)
+
+    ; find closest side
+    ucomiss xmm7, xmm8
+    jae .next1
+    ucomiss xmm7, xmm5
+    jae .next2
+    ucomiss xmm7, xmm14
+    jae .next3
+    ; min = xmm7
+    jmp .inverty
+    .next3:
+    ; min = xmm14
+    jmp .invertx
+    .next2:
+    ucomiss xmm5, xmm14
+    jae .next3
+    ; min = xmm5
+    jmp .invertx
+    .next1:
+    ucomiss xmm8, xmm5
+    jae .next2
+    ucomiss xmm8, xmm14
+    jae .next3
+    ; min = xmm8
+    jmp .inverty
+
+    .inverty:
+    movss xmm15, [ball_dy]
+    mulss xmm15, [minus_one]
+    movss [ball_dy], xmm15
+    jmp .continue
+
+    .invertx:
+    movss xmm15, [ball_dx]
+    mulss xmm15, [minus_one]
+    movss [ball_dx], xmm15
+    jmp .continue
+
+    .continue:
     cmp rcx, rdx
     jz .done
     inc rcx
@@ -1605,6 +1691,7 @@ one: dd 1.0
 zero: dd 0.0
 point_one: dd 0.000001
 minus_one: dd -1.0
+sign_bit_mask: dd 0x7FFFFFFF
 
 cur_time: dq 0.0
 prev_time: dq 0.0
