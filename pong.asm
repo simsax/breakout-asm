@@ -19,7 +19,7 @@
 %define WINDOW_W 800
 %define WINDOW_H 800
 %define WINDOW_SIZE (WINDOW_W * WINDOW_H * 4) ; BGRX format
-%define BALL_COLOR 0x00FF0000 ; red
+%define BALL_COLOR 0x00666666 
 %define PAD_COLOR 0x000000FF ; blue
 %define BLUE_BRICKS_COLOR   0x000000FF
 %define GREEN_BRICKS_COLOR  0x0000FF00
@@ -1120,6 +1120,40 @@ ball_fragment:
     movss xmm3, [ball_y]
     movss xmm4, [ball_ray]
 
+    ; x_coord >= ball_x - ball_ray and x_coord < ball_x + ball_ray
+    subss xmm2, xmm4
+    ucomiss xmm0, xmm2
+    jb .black
+    movss xmm2, [ball_x]
+    addss xmm2, xmm4
+    ucomiss xmm0, xmm2
+    jae .black
+
+    ; y_coord >= ball_y - ball_ray and y_coord < ball_y + ball_ray
+    subss xmm3, xmm4
+    ucomiss xmm1, xmm3
+    jb .black
+    movss xmm3, [ball_y]
+    addss xmm3, xmm4
+    ucomiss xmm1, xmm3
+    jae .black
+
+    mov eax, BALL_COLOR
+    jmp .done
+    .black:
+    mov eax, 0
+    .done:
+    ret
+
+
+; @param xmm0: x coord (normalized)
+; @param xmm1: y coord (normalized)
+; @return eax: rgb color
+ball_fragment_old:
+    movss xmm2, [ball_x]
+    movss xmm3, [ball_y]
+    movss xmm4, [ball_ray]
+
     ; (x_coord - ball_x)^2 + (y_coord - ball_y)^2 <= ball_ray^2
     mulss xmm4, xmm4 ; ray^2
     subss xmm0, xmm2
@@ -1335,23 +1369,23 @@ collide_row:
     cvtss2si rdx, xmm6
 
     ; debug
-    ;mov [rsp], rdi
-    ;mov [rsp + 8], rcx
-    ;mov [rsp + 16], rdx
+    mov [rsp], rdi
+    mov [rsp + 8], rcx
+    mov [rsp + 16], rdx
 
-    ;mov rdi, rcx
-    ;call int_to_ascii
-    ;mov rdi, rax
-    ;call println
-    ;
-    ;mov rdi, [rsp + 16]
-    ;call int_to_ascii
-    ;mov rdi, rax
-    ;call println
+    mov rdi, rcx
+    call int_to_ascii
+    mov rdi, rax
+    call println
+
+    mov rdi, [rsp + 16]
+    call int_to_ascii
+    mov rdi, rax
+    call println
     
-    ;mov rdi, [rsp]
-    ;mov rcx, [rsp + 8]
-    ;mov rdx, [rsp + 16]
+    mov rdi, [rsp]
+    mov rcx, [rsp + 8]
+    mov rdx, [rsp + 16]
 
     movss xmm13, [one]
     mov r8d, NUM_BRICKS
@@ -1394,6 +1428,8 @@ collide_row:
     subss xmm14, xmm9
     andps xmm14, xmm10 ; xmm14 = dist(ball_x, brick_right)
 
+    movss xmm13, [zero]
+
     ; find closest side
     ucomiss xmm7, xmm8
     jae .next1
@@ -1402,31 +1438,53 @@ collide_row:
     ucomiss xmm7, xmm14
     jae .next3
     ; min = xmm7
-    jmp .inverty
+    jmp .goup
     .next3:
     ; min = xmm14
-    jmp .invertx
+    jmp .goright
     .next2:
     ucomiss xmm5, xmm14
     jae .next3
     ; min = xmm5
-    jmp .invertx
+    jmp .goleft
     .next1:
     ucomiss xmm8, xmm5
     jae .next2
     ucomiss xmm8, xmm14
     jae .next3
     ; min = xmm8
+    jmp .godown
+
+    .goup:
+    movss xmm15, [ball_dy]
+    ucomiss xmm15, xmm13
+    jae .continue
     jmp .inverty
 
-    .inverty:
+    .godown:
     movss xmm15, [ball_dy]
+    ucomiss xmm15, xmm13
+    jbe .continue
+    jmp .inverty
+
+    .goleft:
+    movss xmm15, [ball_dx]
+    ucomiss xmm15, xmm13
+    jbe .continue
+    jmp .invertx
+
+    .goright:
+    movss xmm15, [ball_dx]
+    ucomiss xmm15, xmm13
+    jae .continue
+    jmp .invertx
+
+    .inverty:
     mulss xmm15, [minus_one]
     movss [ball_dy], xmm15
     jmp .continue
 
     .invertx:
-    movss xmm15, [ball_dx]
     mulss xmm15, [minus_one]
     movss [ball_dx], xmm15
     jmp .continue
