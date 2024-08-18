@@ -651,50 +651,50 @@ static poll_messages:function
         subss xmm2, xmm3 ; xmm2 = ball_bottom
         
         movss xmm11, [bricks_height]
-        .blue:
-        movss xmm15, [blue_bricks_y]
-        ucomiss xmm1, xmm15
-        jb .walls_collision
-        addss xmm15, xmm11
-        ucomiss xmm2, xmm15
-        jae .green
-        ; collision on blue row
-        lea rdi, [blue_bricks]
-        call collide_row
-        
-        .green:
-        movss xmm15, [green_bricks_y]
-        ucomiss xmm1, xmm15
-        jb .walls_collision
-        addss xmm15, xmm11
-        ucomiss xmm2, xmm15
-        jae .yellow
-        ; collision on green row
-        lea rdi, [green_bricks]
-        call collide_row
-
-        .yellow:
-        movss xmm15, [yellow_bricks_y]
-        ucomiss xmm1, xmm15
-        jb .walls_collision
-        addss xmm15, xmm11
-        ucomiss xmm2, xmm15
-        jae .orange
-        ; collision on yellow row
-        lea rdi, [yellow_bricks]
-        call collide_row
-    
-        .orange:
-        movss xmm15, [orange_bricks_y]
-        ucomiss xmm1, xmm15
-        jb .walls_collision
-        addss xmm15, xmm11
-        ucomiss xmm2, xmm15
-        jae .red
-        ; collision on orange row
-        lea rdi, [orange_bricks]
-        call collide_row
-
+        ;.blue:
+        ;movss xmm15, [blue_bricks_y]
+        ;ucomiss xmm1, xmm15
+        ;jb .walls_collision
+        ;addss xmm15, xmm11
+        ;ucomiss xmm2, xmm15
+        ;jae .green
+        ;; collision on blue row
+        ;lea rdi, [blue_bricks]
+        ;call collide_row
+        ;
+        ;.green:
+        ;movss xmm15, [green_bricks_y]
+        ;ucomiss xmm1, xmm15
+        ;jb .walls_collision
+        ;addss xmm15, xmm11
+        ;ucomiss xmm2, xmm15
+        ;jae .yellow
+        ;; collision on green row
+        ;lea rdi, [green_bricks]
+        ;call collide_row
+        ;
+        ;.yellow:
+        ;movss xmm15, [yellow_bricks_y]
+        ;ucomiss xmm1, xmm15
+        ;jb .walls_collision
+        ;addss xmm15, xmm11
+        ;ucomiss xmm2, xmm15
+        ;jae .orange
+        ;; collision on yellow row
+        ;lea rdi, [yellow_bricks]
+        ;call collide_row
+        ;
+        ;.orange:
+        ;movss xmm15, [orange_bricks_y]
+        ;ucomiss xmm1, xmm15
+        ;jb .walls_collision
+        ;addss xmm15, xmm11
+        ;ucomiss xmm2, xmm15
+        ;jae .red
+        ;; collision on orange row
+        ;lea rdi, [orange_bricks]
+        ;call collide_row
+        ;
         .red:
         movss xmm15, [red_bricks_y]
         ucomiss xmm1, xmm15
@@ -1214,44 +1214,44 @@ bricks_fragment:
     ; find which row of bricks this pixel belongs to
 
     ; if y >= y_brick and y < y_brick + bricks height
-    .blue:
-    ucomiss xmm1, xmm2
-    jb .black
-    addss xmm2, xmm7
-    ucomiss xmm1, xmm2
-    jae .green
-    lea r10, [blue_bricks]
-    movss xmm3, [blue_bricks_y]
-    mov eax, BLUE_BRICKS_COLOR
-    jmp .draw_brick
-
-    .green:
-    addss xmm3, xmm7
-    ucomiss xmm1, xmm3
-    jae .yellow
-    lea r10, [green_bricks]
-    movss xmm3, [green_bricks_y]
-    mov eax, GREEN_BRICKS_COLOR
-    jmp .draw_brick
-
-    .yellow:
-    addss xmm4, xmm7
-    ucomiss xmm1, xmm4
-    jae .orange
-    lea r10, [yellow_bricks]
-    movss xmm3, [yellow_bricks_y]
-    mov eax, YELLOW_BRICKS_COLOR
-    jmp .draw_brick
-
-    .orange:
-    addss xmm5, xmm7
-    ucomiss xmm1, xmm5
-    jae .red
-    lea r10, [orange_bricks]
-    movss xmm3, [orange_bricks_y]
-    mov eax, ORANGE_BRICKS_COLOR
-    jmp .draw_brick
-
+    ;.blue:
+    ;ucomiss xmm1, xmm2
+    ;jb .black
+    ;addss xmm2, xmm7
+    ;ucomiss xmm1, xmm2
+    ;jae .green
+    ;lea r10, [blue_bricks]
+    ;movss xmm3, [blue_bricks_y]
+    ;mov eax, BLUE_BRICKS_COLOR
+    ;jmp .draw_brick
+    ;
+    ;.green:
+    ;addss xmm3, xmm7
+    ;ucomiss xmm1, xmm3
+    ;jae .yellow
+    ;lea r10, [green_bricks]
+    ;movss xmm3, [green_bricks_y]
+    ;mov eax, GREEN_BRICKS_COLOR
+    ;jmp .draw_brick
+    ;
+    ;.yellow:
+    ;addss xmm4, xmm7
+    ;ucomiss xmm1, xmm4
+    ;jae .orange
+    ;lea r10, [yellow_bricks]
+    ;movss xmm3, [yellow_bricks_y]
+    ;mov eax, YELLOW_BRICKS_COLOR
+    ;jmp .draw_brick
+    ;
+    ;.orange:
+    ;addss xmm5, xmm7
+    ;ucomiss xmm1, xmm5
+    ;jae .red
+    ;lea r10, [orange_bricks]
+    ;movss xmm3, [orange_bricks_y]
+    ;mov eax, ORANGE_BRICKS_COLOR
+    ;jmp .draw_brick
+    ;
     .red:
     addss xmm6, xmm7
     ucomiss xmm1, xmm6
@@ -1314,6 +1314,7 @@ bricks_fragment:
     ret
 
 ; @param rdi: pointer to bricks row
+; @param xmm3: ball_ray
 ; @param xmm15: top_bricks_y
 ; @param xmm11: bricks_height
 collide_row:
@@ -1321,6 +1322,10 @@ collide_row:
     mov rbp, rsp
 
     sub rsp, 64
+
+    movd [rsp], xmm15
+    movd [rsp + 4], xmm11
+    mov [rsp + 8], rdi
 
     movss xmm4, [ball_x]
     addss xmm4, xmm3 ; xmm4 = ball_right
@@ -1368,112 +1373,166 @@ collide_row:
     cvtss2si rcx, xmm5
     cvtss2si rdx, xmm6
 
+    mov [rsp + 16], rcx
+    mov [rsp + 24], rdx
+
     ; debug
-    mov [rsp], rdi
-    mov [rsp + 8], rcx
-    mov [rsp + 16], rdx
-
-    mov rdi, rcx
-    call int_to_ascii
-    mov rdi, rax
-    call println
-
-    mov rdi, [rsp + 16]
-    call int_to_ascii
-    mov rdi, rax
-    call println
-    
-    mov rdi, [rsp]
-    mov rcx, [rsp + 8]
-    mov rdx, [rsp + 16]
+    ;mov [rsp], rdi
+    ;mov [rsp + 8], rcx
+    ;mov [rsp + 16], rdx
+    ;
+    ;mov rdi, rcx
+    ;call int_to_ascii
+    ;mov rdi, rax
+    ;call println
+    ;
+    ;mov rdi, [rsp + 16]
+    ;call int_to_ascii
+    ;mov rdi, rax
+    ;call println
+    ;
+    ;mov rdi, [rsp]
+    ;mov rcx, [rsp + 8]
+    ;mov rdx, [rsp + 16]
 
     movss xmm13, [one]
     mov r8d, NUM_BRICKS
     cvtsi2ss xmm12, r8d
     divss xmm13, xmm12 ; xmm13 = bricks width
     
+    mov rcx, [rsp + 16]
     .brick_loop: 
+    mov rdi, [rsp + 8]
     mov al, byte [rdi + rcx]
     test al, al
     jz .continue
-    ; collision
+    ; collision resolution
     mov byte [rdi + rcx], 0 ; destroy brick
 
     ; check which side is colliding, reverse velocity depending on the side
-    ; min(
-    ;    dist(ball_y, brick_top),
-    ;    dist(ball_y, brick_bottom),
-    ;    dist(ball_x, brick_left),
-    ;    dist(ball_x, brick_right),
-    ;)
 
-    movd xmm10, [sign_bit_mask]
-    movss xmm7, [ball_y]
-    subss xmm7, xmm15
-    ; abs (set sign bit to 0)
-    andps xmm7, xmm10 ; xmm7 = dist(ball_y, brick_top)
-    movss xmm8, [ball_y]
-    subss xmm15, xmm11
-    subss xmm8, xmm15
-    andps xmm8, xmm10 ; xmm8 = dist(ball_y, brick_bottom)
-
-    movss xmm9, [ball_x]
-    ; get left and right border of this brick, using index and width
+    ; compute collision direction
+    mulss xmm11, [point_five] ; half_height
+    subss xmm15, xmm11 ; brick_y
     cvtsi2ss xmm5, rcx ; index of brick
     mulss xmm5, xmm13 ; brick_left
+    mulss xmm13, [point_five] ; half_width
+    addss xmm5, xmm13 ; brick_x
+    ; xmm15 = brick_y
+    ; xmm5 = brick_x
+    movss xmm7, [ball_y]
+    movss xmm10, xmm15
+    subss xmm7, xmm10 ; dir_y
+    movss xmm9, [ball_x]
     movss xmm14, xmm5
-    addss xmm14, xmm13 ; brick_right
-    subss xmm5, xmm9
-    andps xmm5, xmm10 ; xmm5 = dist(ball_x, brick_left)
-    subss xmm14, xmm9
-    andps xmm14, xmm10 ; xmm14 = dist(ball_x, brick_right)
+    subss xmm9, xmm14 ; dir_x
+    ; xmm7 = dir_y
+    ; xmm9 = dir_x
 
+    ; up [0,1]
+    ; dot(dir, up)
+    movss xmm4, [zero]
+    movss xmm5, [one]
+    mulss xmm4, xmm9
+    mulss xmm5, xmm7
+    addss xmm4, xmm5
+    movss xmm6, xmm4 ; max value
+    mov r10b, 0 ; max dir (0 up, 1 down, 2 right, 3 left)
+
+    .down:
+    ; down [0, -1]
+    movss xmm4, [zero]
+    movss xmm5, [minus_one]
+    mulss xmm4, xmm9
+    mulss xmm5, xmm7
+    addss xmm4, xmm5
+    ucomiss xmm6, xmm4
+    jae .right
+    movss xmm6, xmm4 ; max value
+    mov r10b, 2
+
+    ; right [1, 0]
+    .right:
+    movss xmm4, [one]
+    movss xmm5, [zero]
+    mulss xmm4, xmm9
+    mulss xmm5, xmm7
+    addss xmm4, xmm5
+    ucomiss xmm6, xmm4
+    jae .left
+    movss xmm6, xmm4 ; max value
+    mov r10b, 1
+
+    .left:
+    ; left [-1, 0]
+    movss xmm4, [minus_one]
+    movss xmm5, [zero]
+    mulss xmm4, xmm9
+    mulss xmm5, xmm7
+    addss xmm4, xmm5
+    ucomiss xmm6, xmm4
+    jae .resolution
+    movss xmm6, xmm4 ; max value
+    mov r10b, 3
+
+    .resolution:
     movss xmm13, [zero]
+    movss xmm11, [rsp + 4] ; bricks height
+    movss xmm14, [rsp] ; top_brick_y
 
-    ; find closest side
-    ucomiss xmm7, xmm8
-    jae .next1
-    ucomiss xmm7, xmm5
-    jae .next2
-    ucomiss xmm7, xmm14
-    jae .next3
-    ; min = xmm7
-    jmp .goup
-    .next3:
-    ; min = xmm14
-    jmp .goright
-    .next2:
-    ucomiss xmm5, xmm14
-    jae .next3
-    ; min = xmm5
-    jmp .goleft
-    .next1:
-    ucomiss xmm8, xmm5
-    jae .next2
-    ucomiss xmm8, xmm14
-    jae .next3
-    ; min = xmm8
-    jmp .godown
+    cmp r10b, 0
+    je .collide_up
+    cmp r10b, 1
+    je .collide_right
+    cmp r10b, 2
+    je .collide_down
+    jmp .collide_left
 
-    .goup:
+    .collide_up:
+    lea rdi, [up]
+    call println
+    ; reposition
+    movss xmm5, [ball_ray]
+    addss xmm5, xmm14 ; ball_y = top_brick_y + half_ball_height
+    movss [ball_y], xmm5
+    ; change velocity
     movss xmm15, [ball_dy]
     ucomiss xmm15, xmm13
     jae .continue
     jmp .inverty
 
-    .godown:
+    .collide_down:
+    lea rdi, [down]
+    call println
+    ; reposition
+    movss xmm5, [ball_ray]
+    subss xmm14, xmm11
+    subss xmm14, xmm5 ; ball_y = top_brick_y - brick_height - half_ball_height
+    movss [ball_y], xmm14
+
+    ; change velocity
     movss xmm15, [ball_dy]
     ucomiss xmm15, xmm13
     jbe .continue
     jmp .inverty
 
-    .goleft:
+    .collide_left:
+    lea rdi, [left]
+    call println
+    ; reposition
+
+    ; change velocity
     movss xmm15, [ball_dx]
     ucomiss xmm15, xmm13
     jbe .continue
     jmp .invertx
 
-    .goright:
+    .collide_right:
+    ; reposition
+    lea rdi, [right]
+    call println
+
+    ; change velocity
     movss xmm15, [ball_dx]
     ucomiss xmm15, xmm13
     jae .continue
@@ -1490,9 +1549,12 @@ collide_row:
     jmp .continue
 
     .continue:
+    mov rcx, [rsp + 16]
+    mov rdx, [rsp + 24]
     cmp rcx, rdx
     jz .done
     inc rcx
+    mov [rsp + 16], rcx
     jmp .brick_loop
     .done:
     add rsp, 64
@@ -1721,7 +1783,7 @@ ball_ray: dd 0.012
 ball_min: equ ball_ray
 ball_max: dd 0.988 ; 1 - ball_ray
 ball_x: dd 0.05
-ball_y: dd 0.8
+ball_y: dd 0.1
 ball_dx: dd 0.5
 ball_dy: dd 0.5
 
@@ -1748,6 +1810,7 @@ max_rgb: dd 255.0
 one: dd 1.0
 zero: dd 0.0
 point_one: dd 0.000001
+point_five: dd 0.5
 minus_one: dd -1.0
 sign_bit_mask: dd 0x7FFFFFFF
 
@@ -1761,6 +1824,11 @@ green: db "GREEN", 0
 yellow: db "YELLOW", 0
 orange: db "ORANGE", 0
 red: db "RED", 0
+up: db "UP", 0
+down: db "DOWN", 0
+left: db "LEFT", 0
+right: db "RIGHT", 0
+
 
 section .bss
 
@@ -1779,4 +1847,7 @@ buffer:
     resb 256
 buffer_end:
 
-; TODO: cap framerate to 60 fps (nanosleep)
+; TODO: just keep an internal score and show it at the end (game over, score) or you won (score)
+; the bug is probably in the other rows
+; maybe I don't have to loop (next collision is resolved on next frame)
+
