@@ -1410,85 +1410,90 @@ collide_row:
     mov byte [rdi + rcx], 0 ; destroy brick
 
     ; check which side is colliding, reverse velocity depending on the side
+    mov r10b, 0 ; 0 for vertical collision, 1 for horizontal collision
 
-    ; compute collision direction
-    mulss xmm11, [point_five] ; half_height
-    subss xmm15, xmm11 ; brick_y
+    ; compute collision intersection
+    movss xmm14, xmm15 ; brick_y_top
+    subss xmm15, xmm11 ; brick_y_bottom
+    movss xmm9, xmm11
+    mulss xmm9, [point_five]
+    addss xmm9, xmm15 ; brick_y
     cvtsi2ss xmm5, rcx ; index of brick
-    mulss xmm5, xmm13 ; brick_left
-    mulss xmm13, [point_five] ; half_width
-    addss xmm5, xmm13 ; brick_x
-    ; xmm15 = brick_y
-    ; xmm5 = brick_x
+    mulss xmm5, xmm13 ; brick_x_left
+    movss xmm4, xmm13
+    mulss xmm4, [point_five]
+    addss xmm4, xmm5 ; brick_x
+    addss xmm13, xmm5 ; brick_x_right
+
+    ; xmm5 = brick_x_left
+    ; xmm13 = brick_x_right
+    ; xmm14 = brick_y_top
+    ; xmm15 = brick_y_bottom
+    ; xmm4 = brick_x
+    ; xmm9 = brick_y
+
+    movss xmm7, [ball_x]
+    subss xmm7, xmm3
+    ucomiss xmm7, xmm5
+    jae .next_int_x
+    addss xmm7, xmm3
+    addss xmm7, xmm3 ; ball_x_right
+    subss xmm7, xmm5
+    movss xmm6, xmm7 ; intersection_width_x
+    jmp .y_int
+    .next_int_x:
+    movss xmm7, [ball_x]
+    addss xmm7, xmm3
+    ucomiss xmm7, xmm13
+    jb .resolve_vertical
+    subss xmm7, xmm3 ; ball_x_left
+    movss xmm6, xmm13
+    subss xmm6, xmm7 ; intersection_width_x
+    jmp .y_int
+
+    .y_int:
+    ; xmm6 = intersection_width_x
     movss xmm7, [ball_y]
-    movss xmm10, xmm15
-    subss xmm7, xmm10 ; dir_y
-    movss xmm9, [ball_x]
-    movss xmm14, xmm5
-    subss xmm9, xmm14 ; dir_x
-    ; xmm7 = dir_y
-    ; xmm9 = dir_x
+    subss xmm7, xmm3
+    ucomiss xmm7, xmm15
+    jae .next_int_y
+    addss xmm7, xmm3
+    addss xmm7, xmm3 ; ball_y_top
+    subss xmm7, xmm15
+    movss xmm8, xmm7 ; intersection_width_y
+    jmp .compare_intersections
+    .next_int_y:
+    movss xmm7, [ball_y]
+    addss xmm7, xmm3
+    ucomiss xmm7, xmm14
+    jb .resolve_horizontal
+    subss xmm7, xmm3 ; ball_y_bottom
+    movss xmm8, xmm14
+    subss xmm8, xmm7 ; intersection_width_y
 
-    ; up [0,1]
-    ; dot(dir, up)
-    movss xmm4, [zero]
-    movss xmm5, [one]
-    mulss xmm4, xmm9
-    mulss xmm5, xmm7
-    addss xmm4, xmm5
-    movss xmm6, xmm4 ; max value
-    mov r10b, 0 ; max dir (0 up, 1 down, 2 right, 3 left)
+    .compare_intersections:
+    ucomiss xmm6, xmm8
+    jae .resolve_vertical
+    jmp .resolve_horizontal
 
-    .down:
-    ; down [0, -1]
-    movss xmm4, [zero]
-    movss xmm5, [minus_one]
-    mulss xmm4, xmm9
-    mulss xmm5, xmm7
-    addss xmm4, xmm5
-    ucomiss xmm6, xmm4
-    jae .right
-    movss xmm6, xmm4 ; max value
-    mov r10b, 2
+    .resolve_vertical:
+    ; check if up or down
+    movss xmm7, [ball_y]
+    ucomiss xmm7, xmm9
+    jbe .collide_down
+    jmp .collide_up
 
-    ; right [1, 0]
-    .right:
-    movss xmm4, [one]
-    movss xmm5, [zero]
-    mulss xmm4, xmm9
-    mulss xmm5, xmm7
-    addss xmm4, xmm5
-    ucomiss xmm6, xmm4
-    jae .left
-    movss xmm6, xmm4 ; max value
-    mov r10b, 1
+    .resolve_horizontal:
+    ; check if left or right
+    movss xmm7, [ball_x]
+    ucomiss xmm7, xmm4
+    jbe .collide_left
+    jmp .collide_right
 
-    .left:
-    ; left [-1, 0]
-    movss xmm4, [minus_one]
-    movss xmm5, [zero]
-    mulss xmm4, xmm9
-    mulss xmm5, xmm7
-    addss xmm4, xmm5
-    ucomiss xmm6, xmm4
-    jae .resolution
-    movss xmm6, xmm4 ; max value
-    mov r10b, 3
-
-    .resolution:
+    .collide_up:
     movss xmm13, [zero]
     movss xmm11, [rsp + 4] ; bricks height
     movss xmm14, [rsp] ; top_brick_y
-
-    cmp r10b, 0
-    je .collide_up
-    cmp r10b, 1
-    je .collide_right
-    cmp r10b, 2
-    je .collide_down
-    jmp .collide_left
-
-    .collide_up:
     lea rdi, [up]
     call println
     ; reposition
@@ -1502,6 +1507,9 @@ collide_row:
     jmp .inverty
 
     .collide_down:
+    movss xmm13, [zero]
+    movss xmm11, [rsp + 4] ; bricks height
+    movss xmm14, [rsp] ; top_brick_y
     lea rdi, [down]
     call println
     ; reposition
@@ -1517,6 +1525,9 @@ collide_row:
     jmp .inverty
 
     .collide_left:
+    movss xmm13, [zero]
+    movss xmm11, [rsp + 4] ; bricks height
+    movss xmm14, [rsp] ; top_brick_y
     lea rdi, [left]
     call println
     ; reposition
@@ -1528,9 +1539,12 @@ collide_row:
     jmp .invertx
 
     .collide_right:
-    ; reposition
+    movss xmm13, [zero]
+    movss xmm11, [rsp + 4] ; bricks height
+    movss xmm14, [rsp] ; top_brick_y
     lea rdi, [right]
     call println
+    ; reposition
 
     ; change velocity
     movss xmm15, [ball_dx]
@@ -1783,7 +1797,7 @@ ball_ray: dd 0.012
 ball_min: equ ball_ray
 ball_max: dd 0.988 ; 1 - ball_ray
 ball_x: dd 0.05
-ball_y: dd 0.1
+ball_y: dd 0.8
 ball_dx: dd 0.5
 ball_dy: dd 0.5
 
