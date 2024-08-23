@@ -484,6 +484,7 @@ static poll_messages:function
 
     mov byte [rsp + 24], 0 ; moving left
     mov byte [rsp + 25], 0 ; moving right
+    mov byte [rsp + 42], 0 ; game over
 
     .loop:
         mov rax, SYS_POLL
@@ -570,6 +571,22 @@ static poll_messages:function
         jmp .update
 
         .update:
+        mov al, [rsp + 42] 
+        test al, al
+        jz .not_game_over
+
+        .game_over:
+        mov rdi, [rsp]
+        lea rsi, [game_over]
+        mov edx, 9
+        mov ecx, [rsp + 16]
+        mov r8d, [rsp + 20]
+        mov r9d, (WINDOW_H / 2 - 200)
+        shl r9d, 16
+        or r9d, (WINDOW_W / 2 - 28)
+        call x11_draw_text
+        jmp .loop
+        .not_game_over:
         ; calculate delta time for current frame
         call update_current_time
         movsd xmm14, [cur_time]
@@ -745,8 +762,10 @@ static poll_messages:function
         jmp .movey
 
         .collide_down_wall:
-        movss [ball_y], xmm4
-        jmp .inverty
+        mov byte [rsp + 42], 1
+        jmp .game_over
+        ;movss [ball_y], xmm4
+        ;jmp .inverty
 
         .collide_up_wall:
         movss [ball_y], xmm1
@@ -1135,7 +1154,7 @@ color_image:
 ; @param xmm0: x coord (normalized)
 ; @param xmm1: y coord (normalized)
 ; @return eax: rgb color
-ball_fragment:
+ball_fragment_square:
     movss xmm2, [ball_x]
     movss xmm3, [ball_y]
     movss xmm4, [ball_ray]
@@ -1169,7 +1188,7 @@ ball_fragment:
 ; @param xmm0: x coord (normalized)
 ; @param xmm1: y coord (normalized)
 ; @return eax: rgb color
-ball_fragment_old:
+ball_fragment_round:
     movss xmm2, [ball_x]
     movss xmm3, [ball_y]
     movss xmm4, [ball_ray]
@@ -1384,7 +1403,6 @@ collide_row:
     mov r8d, NUM_BRICKS
     cvtsi2ss xmm12, r8d
     divss xmm13, xmm12 ; xmm13 = bricks width
-    movd [rsp + 24], xmm13
     
     mov rcx, [rsp + 16]
     mov rdi, [rsp + 8]
@@ -1405,12 +1423,12 @@ collide_row:
     addss xmm9, xmm15 ; brick_y
     cvtsi2ss xmm5, rcx ; index of brick
     mulss xmm5, xmm13 ; brick_x_left
-    movd [rsp + 28], xmm5
+    movd [rsp + 24], xmm5
     movss xmm4, xmm13
     mulss xmm4, [point_five]
     addss xmm4, xmm5 ; brick_x
     addss xmm13, xmm5 ; brick_x_right
-    movd [rsp + 32], xmm13
+    movd [rsp + 28], xmm13
 
     ; xmm5 = brick_x_left
     ; xmm13 = brick_x_right
@@ -1510,12 +1528,11 @@ collide_row:
 
     .collide_left:
     movss xmm13, [zero]
-    movss xmm11, [rsp + 24] ; bricks width
-    movss xmm14, [rsp + 28] ; left_brick_x
+    movss xmm14, [rsp + 24] ; left_brick_x
     ; reposition
     movss xmm5, [ball_ray]
     subss xmm14, xmm5 ; ball_x = left_brick_x - ball_ray
-    movss [ball_x], xmm5
+    movss [ball_x], xmm14
     ; change velocity
     movss xmm15, [ball_dx]
     ucomiss xmm15, xmm13
@@ -1524,8 +1541,7 @@ collide_row:
 
     .collide_right:
     movss xmm13, [zero]
-    movss xmm11, [rsp + 24] ; bricks width
-    movss xmm14, [rsp + 32] ; right_brick_x
+    movss xmm14, [rsp + 28] ; right_brick_x
     ; reposition
     movss xmm5, [ball_ray]
     addss xmm5, xmm14 ; ball_x = right_brick_x + ball_ray
@@ -1596,7 +1612,7 @@ render_game:
     ; render ball
     movss xmm0, xmm2 ; u
     movss xmm1, xmm3 ; v
-    call ball_fragment
+    call ball_fragment_square
     cmp eax, 0
     jne .color
 
@@ -1773,7 +1789,7 @@ ball_ray: dd 0.012
 ball_min: equ ball_ray
 ball_max: dd 0.988 ; 1 - ball_ray
 ball_x: dd 0.05
-ball_y: dd 0.8
+ball_y: dd 0.1
 ball_dx: dd 0.5
 ball_dy: dd 0.5
 
@@ -1794,7 +1810,6 @@ yellow_bricks_y: dd 0.550
 orange_bricks_y: dd 0.575
 red_bricks_y: dd 0.6
 bricks_border: dd 0.0024
-;bricks_border: dd 0.0045
 
 max_rgb: dd 255.0 
 one: dd 1.0
@@ -1808,6 +1823,8 @@ cur_time: dq 0.0
 prev_time: dq 0.0
 one_billion: dq 1000000000.0 
 
+game_over: db "GAME OVER", 0
+
 ; debug utils
 blue: db "BLUE", 0
 green: db "GREEN", 0
@@ -1818,7 +1835,6 @@ up: db "UP", 0
 down: db "DOWN", 0
 left: db "LEFT", 0
 right: db "RIGHT", 0
-
 
 section .bss
 
