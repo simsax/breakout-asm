@@ -3,6 +3,7 @@
 %define STDERR 2
 %define AF_UNIX 1
 %define SOCK_STREAM 1
+%define KEYCODE_ENTER 36
 %define KEYCODE_LEFT 113
 %define KEYCODE_RIGHT 114
 %define SYS_READ 0
@@ -19,8 +20,8 @@
 %define WINDOW_W 800
 %define WINDOW_H 800
 %define WINDOW_SIZE (WINDOW_W * WINDOW_H * 4) ; BGRX format
-%define BALL_COLOR 0x00666666 
-%define PAD_COLOR 0x000000FF ; blue
+%define BALL_COLOR 0x00FF00FF 
+%define PAD_COLOR 0x00555555
 %define BLUE_BRICKS_COLOR   0x000000FF
 %define GREEN_BRICKS_COLOR  0x0000FF00
 %define YELLOW_BRICKS_COLOR 0x00FFFF00
@@ -485,6 +486,7 @@ static poll_messages:function
     mov byte [rsp + 24], 0 ; moving left
     mov byte [rsp + 25], 0 ; moving right
     mov byte [rsp + 42], 0 ; game over
+    mov byte [rsp + 43], 0 ; won
 
     .loop:
         mov rax, SYS_POLL
@@ -494,7 +496,7 @@ static poll_messages:function
         syscall
 
         cmp rax, 0
-        je .update ; timeout
+        je .check_end ; timeout
         jl die
 
         cmp dword [rsp + 2*4], POLLERR  
@@ -518,19 +520,19 @@ static poll_messages:function
         ; left press
         mov byte [rsp + 24], 1
         ;mov byte [rsp + 12], KEYCODE_LEFT
-        jmp .update
+        jmp .check_end
 
         .keypress_right:
         cmp sil, KEYCODE_RIGHT
-        jnz .update
+        jnz .check_end
         ; right press
         mov byte [rsp + 25], 1
         ;mov byte [rsp + 12], KEYCODE_RIGHT
-        jmp .update
+        jmp .check_end
 
         .key_release:
         cmp eax, X11_EVENT_KEY_RELEASE
-        jnz .update
+        jnz .check_end
 
         ; KEYRELEASE EVENT
         mov r15b, byte [rsp - 16 - 31] ; keycode
@@ -554,26 +556,119 @@ static poll_messages:function
         jnz .keyrelease_left
         mov r11w, word [rsp - 16 - 30]
         cmp r10w, r11w ; check if this key-press has same sequence number as previous release
-        jz .update ; fake release, ignore
+        jz .check_end ; fake release, ignore
 
         .keyrelease_left:
         cmp r15b, KEYCODE_LEFT
         jnz .keyrelease_right
         ; left release
         mov byte [rsp + 24], 0
-        jmp .update
+        jmp .check_end
 
         .keyrelease_right:
         cmp r15b, KEYCODE_RIGHT
-        jnz .update
+        jnz .keyrelease_enter
         ; right release
         mov byte [rsp + 25], 0
-        jmp .update
+        jmp .check_end
 
-        .update:
+        .keyrelease_enter:
+        ; if game over and pressed enter, restart game
+        cmp r15b, KEYCODE_ENTER
+        jnz .check_end
+        ; enter release
         mov al, [rsp + 42] 
         test al, al
-        jz .not_game_over
+        jnz .enter_release
+        mov al, [rsp + 43] 
+        test al, al
+        jnz .enter_release
+        jmp .update
+        ; reset game state
+        .enter_release:
+        mov byte [rsp + 24], 0
+        mov byte [rsp + 25], 0
+        mov byte [rsp + 42], 0
+        mov byte [rsp + 43], 0
+        movss xmm0, [f_005]
+        movss [ball_x], xmm0
+        movss xmm0, [f_01]
+        movss [ball_y], xmm0
+        movss xmm0, [f_05]
+        movss [ball_dx], xmm0
+        movss [ball_dy], xmm0
+        movss [pad_x], xmm0
+        call init_bricks
+        call update_current_time
+        movsd xmm0, [cur_time]
+        movsd [prev_time], xmm0
+        jmp .loop
+
+        .check_end:
+        mov al, [rsp + 42] 
+        test al, al
+        jnz .game_over
+        mov al, [rsp + 43] 
+        test al, al
+        jnz .player_won
+        jmp .check_win
+
+        .player_won:
+        mov rdi, [rsp]
+        lea rsi, [you_won]
+        mov edx, 8
+        mov ecx, [rsp + 16]
+        mov r8d, [rsp + 20]
+        mov r9d, (WINDOW_H / 2 - 200)
+        shl r9d, 16
+        or r9d, (WINDOW_W / 4)
+        call x11_draw_text
+        mov rdi, [rsp]
+        lea rsi, [play_again]
+        mov edx, 25
+        mov ecx, [rsp + 16]
+        mov r8d, [rsp + 20]
+        mov r9d, (WINDOW_H / 2 - 160)
+        shl r9d, 16
+        or r9d, (WINDOW_W / 4)
+        call x11_draw_text
+        jmp .loop
+
+        .check_win:
+        lea rdi, [blue_bricks]
+        mov rsi, NUM_BRICKS
+        call check_all_zero
+        test rax, rax
+        jz .update
+        lea rdi, [green_bricks]
+        mov rsi, NUM_BRICKS
+        call check_all_zero
+        test rax, rax
+        jz .update
+        lea rdi, [yellow_bricks]
+        mov rsi, NUM_BRICKS
+        call check_all_zero
+        test rax, rax
+        jz .update
+        lea rdi, [orange_bricks]
+        mov rsi, NUM_BRICKS
+        call check_all_zero
+        test rax, rax
+        jz .update
+        lea rdi, [red_bricks]
+        mov rsi, NUM_BRICKS
+        call check_all_zero
+        test rax, rax
+        jz .update
+        ; player won
+        mov rdi, [rsp]
+        mov rsi, [rsp + 16]
+        mov edx, WINDOW_W
+        shl edx, 16
+        mov edx, WINDOW_H
+        call x11_clear_window 
+        mov byte [rsp + 43], 1
+        jmp .player_won
 
         .game_over:
         mov rdi, [rsp]
@@ -583,10 +678,20 @@ static poll_messages:function
         mov r8d, [rsp + 20]
         mov r9d, (WINDOW_H / 2 - 200)
         shl r9d, 16
-        or r9d, (WINDOW_W / 2 - 28)
+        or r9d, (WINDOW_W / 4)
+        call x11_draw_text
+        mov rdi, [rsp]
+        lea rsi, [play_again]
+        mov edx, 25
+        mov ecx, [rsp + 16]
+        mov r8d, [rsp + 20]
+        mov r9d, (WINDOW_H / 2 - 160)
+        shl r9d, 16
+        or r9d, (WINDOW_W / 4)
         call x11_draw_text
         jmp .loop
-        .not_game_over:
+
+        .update:
         ; calculate delta time for current frame
         call update_current_time
         movsd xmm14, [cur_time]
@@ -647,7 +752,7 @@ static poll_messages:function
         subss xmm7, xmm4 ; bottom of ball
         addss xmm9, xmm5 ; pad right
 
-        ucomiss xmm12, [zero]
+        ucomiss xmm12, [f_0]
         ja .bricks_collision ; skip pad collision if going up
         ucomiss xmm7, xmm6 ; ball_y_bottom <= pad_y_top
         ja .bricks_collision
@@ -744,7 +849,7 @@ static poll_messages:function
 
         .invertx:
         movss xmm2, [ball_dx]
-        mulss xmm2, [minus_one]
+        mulss xmm2, [f_neg_1]
         movss [ball_dx], xmm2
         .movex:
         movd xmm14, [rsp + 60]
@@ -762,6 +867,12 @@ static poll_messages:function
         jmp .movey
 
         .collide_down_wall:
+        mov rdi, [rsp]
+        mov rsi, [rsp + 16]
+        mov edx, WINDOW_W
+        shl edx, 16
+        mov edx, WINDOW_H
+        call x11_clear_window 
         mov byte [rsp + 42], 1
         jmp .game_over
         ;movss [ball_y], xmm4
@@ -772,7 +883,7 @@ static poll_messages:function
         jmp .inverty
 
         .inverty:
-        mulss xmm12, [minus_one]
+        mulss xmm12, [f_neg_1]
         movss [ball_dy], xmm12
         .movey:
         mulss xmm12, xmm14 ; ds = dv * dt
@@ -1184,7 +1295,6 @@ ball_fragment_square:
     .done:
     ret
 
-
 ; @param xmm0: x coord (normalized)
 ; @param xmm1: y coord (normalized)
 ; @return eax: rgb color
@@ -1308,7 +1418,7 @@ bricks_fragment:
     cvtsi2ss xmm5, rcx
     ucomiss xmm5, xmm4
     jbe .next
-    subss xmm5, [one] ; floor
+    subss xmm5, [f_1] ; floor
     .next:
     ; xmm5 has the index
     cvtss2si rcx, xmm5
@@ -1319,7 +1429,7 @@ bricks_fragment:
     ; check if point is in bricks border
     movss xmm10, [bricks_border]
     cvtsi2ss xmm4, rsi
-    movss xmm6, [one]
+    movss xmm6, [f_1]
     divss xmm6, xmm4 ; width of brick
     mulss xmm5, xmm6 ; brick_x
     ; x < (brick_x + border) or x >= (brick_x + width - border)
@@ -1372,17 +1482,17 @@ collide_row:
     subss xmm5, xmm3 ; xmm5 = ball_left
 
     ; clamp to [0,1]
-    movss xmm7, [zero]
+    movss xmm7, [f_0]
     ucomiss xmm5, xmm7
     jae .one
     movss xmm5, xmm7 ; 0
     .one:
-    movss xmm7, [one]
+    movss xmm7, [f_1]
     ucomiss xmm4, xmm7
     jb .calc_collision
     .one_clamp:
     movss xmm4, xmm7 ; 1
-    subss xmm4, [point_one]
+    subss xmm4, [f_0000001]
 
     .calc_collision:
     mov rsi, NUM_BRICKS
@@ -1392,14 +1502,14 @@ collide_row:
     cvtsi2ss xmm5, rcx
     ucomiss xmm5, xmm6
     jbe .check_coll
-    subss xmm5, [one] ; floor
+    subss xmm5, [f_1] ; floor
     .check_coll:
     ; xmm5 has index of leftmost brick colliding
 
     cvtss2si rcx, xmm5
     mov [rsp + 16], rcx
 
-    movss xmm13, [one]
+    movss xmm13, [f_1]
     mov r8d, NUM_BRICKS
     cvtsi2ss xmm12, r8d
     divss xmm13, xmm12 ; xmm13 = bricks width
@@ -1419,13 +1529,13 @@ collide_row:
     movss xmm14, xmm15 ; brick_y_top
     subss xmm15, xmm11 ; brick_y_bottom
     movss xmm9, xmm11
-    mulss xmm9, [point_five]
+    mulss xmm9, [f_05]
     addss xmm9, xmm15 ; brick_y
     cvtsi2ss xmm5, rcx ; index of brick
     mulss xmm5, xmm13 ; brick_x_left
     movd [rsp + 24], xmm5
     movss xmm4, xmm13
-    mulss xmm4, [point_five]
+    mulss xmm4, [f_05]
     addss xmm4, xmm5 ; brick_x
     addss xmm13, xmm5 ; brick_x_right
     movd [rsp + 28], xmm13
@@ -1498,7 +1608,7 @@ collide_row:
     jmp .collide_right
 
     .collide_up:
-    movss xmm13, [zero]
+    movss xmm13, [f_0]
     movss xmm11, [rsp + 4] ; bricks height
     movss xmm14, [rsp] ; top_brick_y
     ; reposition
@@ -1512,7 +1622,7 @@ collide_row:
     jmp .inverty
 
     .collide_down:
-    movss xmm13, [zero]
+    movss xmm13, [f_0]
     movss xmm11, [rsp + 4] ; bricks height
     movss xmm14, [rsp] ; top_brick_y
     ; reposition
@@ -1527,7 +1637,7 @@ collide_row:
     jmp .inverty
 
     .collide_left:
-    movss xmm13, [zero]
+    movss xmm13, [f_0]
     movss xmm14, [rsp + 24] ; left_brick_x
     ; reposition
     movss xmm5, [ball_ray]
@@ -1540,7 +1650,7 @@ collide_row:
     jmp .invertx
 
     .collide_right:
-    movss xmm13, [zero]
+    movss xmm13, [f_0]
     movss xmm14, [rsp + 28] ; right_brick_x
     ; reposition
     movss xmm5, [ball_ray]
@@ -1553,12 +1663,12 @@ collide_row:
     jmp .invertx
 
     .inverty:
-    mulss xmm15, [minus_one]
+    mulss xmm15, [f_neg_1]
     movss [ball_dy], xmm15
     jmp .done
 
     .invertx:
-    mulss xmm15, [minus_one]
+    mulss xmm15, [f_neg_1]
     movss [ball_dx], xmm15
     jmp .done
 
@@ -1586,7 +1696,7 @@ render_game:
         
     cvtsi2ss xmm14, esi ; width
     cvtsi2ss xmm15, edx ; height
-    movss xmm5, [max_rgb]
+    movss xmm5, [f_255]
 
     .row_loop:
     cmp r8d, r13d
@@ -1595,7 +1705,7 @@ render_game:
     cmp r9d, r12d
     jge .next_row
 
-    movss xmm9, [one]
+    movss xmm9, [f_1]
     ; u coord
     cvtsi2ss xmm2, r9
     divss xmm2, xmm14
@@ -1672,6 +1782,52 @@ update_current_time:
     movsd [cur_time], xmm0
     ret
 
+init_bricks:
+    lea rdi, [blue_bricks]
+    mov rsi, 1
+    mov rdx, NUM_BRICKS
+    call memset_byte
+
+    lea rdi, [green_bricks]
+    mov rsi, 1
+    mov rdx, NUM_BRICKS
+    call memset_byte
+
+    lea rdi, [yellow_bricks]
+    mov rsi, 1
+    mov rdx, NUM_BRICKS
+    call memset_byte
+
+    lea rdi, [orange_bricks]
+    mov rsi, 1
+    mov rdx, NUM_BRICKS
+    call memset_byte
+
+    lea rdi, [red_bricks]
+    mov rsi, 1
+    mov rdx, NUM_BRICKS
+    call memset_byte
+    ret
+
+; @param rdi: pointer to array
+; @param rsi: length of array
+check_all_zero:
+    mov rcx, 0
+    mov rax, 0
+    mov r8b, 0
+    .loop:
+    cmp rcx, rsi
+    jge .true
+    mov r8b, byte [rdi + rcx]
+    test r8b, r8b
+    jnz .done
+    inc rcx
+    jmp .loop
+    .true:
+    mov rax, 1
+    .done:
+    ret
+
 _start:
     call x11_connect_to_server
     mov r15, rax ; Store the socket file descriptor in r15.
@@ -1736,31 +1892,7 @@ _start:
     movsd xmm0, [cur_time]
     movsd [prev_time], xmm0
 
-    ; init bricks
-    lea rdi, [blue_bricks]
-    mov rsi, 1
-    mov rdx, NUM_BRICKS
-    call memset_byte
-
-    lea rdi, [green_bricks]
-    mov rsi, 1
-    mov rdx, NUM_BRICKS
-    call memset_byte
-
-    lea rdi, [yellow_bricks]
-    mov rsi, 1
-    mov rdx, NUM_BRICKS
-    call memset_byte
-
-    lea rdi, [orange_bricks]
-    mov rsi, 1
-    mov rdx, NUM_BRICKS
-    call memset_byte
-
-    lea rdi, [red_bricks]
-    mov rsi, 1
-    mov rdx, NUM_BRICKS
-    call memset_byte
+    call init_bricks
 
     mov rdi, r15 ; socket fd
     mov esi, ebx ; window id
@@ -1789,7 +1921,7 @@ ball_ray: dd 0.012
 ball_min: equ ball_ray
 ball_max: dd 0.988 ; 1 - ball_ray
 ball_x: dd 0.05
-ball_y: dd 0.1
+ball_y: dd 0.8
 ball_dx: dd 0.5
 ball_dy: dd 0.5
 
@@ -1811,19 +1943,24 @@ orange_bricks_y: dd 0.575
 red_bricks_y: dd 0.6
 bricks_border: dd 0.0024
 
-max_rgb: dd 255.0 
-one: dd 1.0
-zero: dd 0.0
-point_one: dd 0.000001
-point_five: dd 0.5
-minus_one: dd -1.0
-sign_bit_mask: dd 0x7FFFFFFF
+; fp values
+f_255: dd 255.0 
+f_1: dd 1.0
+f_0: dd 0.0
+f_0000001: dd 0.000001
+f_05: dd 0.5
+f_neg_1: dd -1.0
+f_005: dd 0.05
+f_01: dd 0.1
+d_0: dq 0.0
 
 cur_time: dq 0.0
 prev_time: dq 0.0
 one_billion: dq 1000000000.0 
 
+you_won: db "YOU WON!", 0
 game_over: db "GAME OVER", 0
+play_again: db "Press ENTER to play again", 0
 
 ; debug utils
 blue: db "BLUE", 0
@@ -1852,8 +1989,4 @@ red_bricks: resb NUM_BRICKS
 buffer:
     resb 256
 buffer_end:
-
-; TODO: just keep an internal score and show it at the end (game over, score) or you won (score)
-; the bug is probably in the other rows
-; maybe I don't have to loop (next collision is resolved on next frame)
 
