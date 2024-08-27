@@ -14,20 +14,22 @@
 %define SYS_EXIT 60
 %define SYS_FCNTL 72
 %define SYS_GETTIME 228
+%define SYS_NANOSLEEP 35
 %define EAGAIN -11
 %define POLL_TIMEOUT 0
 
 %define WINDOW_W 800
 %define WINDOW_H 800
 %define WINDOW_SIZE (WINDOW_W * WINDOW_H * 4) ; BGRX format
-%define BALL_COLOR 0x00FF00FF 
-%define PAD_COLOR 0x00555555
-%define BLUE_BRICKS_COLOR   0x000000FF
-%define GREEN_BRICKS_COLOR  0x0000FF00
-%define YELLOW_BRICKS_COLOR 0x00FFFF00
-%define ORANGE_BRICKS_COLOR 0x00FF8800
-%define RED_BRICKS_COLOR    0x00FF0000
-%define BORDER_BRICKS_COLOR 0
+%define BACKGROUND_COLOR 0x00141414
+%define BALL_COLOR 0x00EBDBB2
+%define PAD_COLOR 0x00D3869B
+%define BLUE_BRICKS_COLOR   0x00458588
+%define GREEN_BRICKS_COLOR  0x0098971A
+%define YELLOW_BRICKS_COLOR 0x00D79921
+%define ORANGE_BRICKS_COLOR 0x00D65D0E
+%define RED_BRICKS_COLOR    0x00CC241D
+%define BORDER_BRICKS_COLOR BACKGROUND_COLOR
 %define NUM_BRICKS 16
 
 global _start
@@ -590,9 +592,10 @@ static poll_messages:function
         mov byte [rsp + 25], 0
         mov byte [rsp + 42], 0
         mov byte [rsp + 43], 0
-        movss xmm0, [f_005]
+        movss xmm0, [f_05]
         movss [ball_x], xmm0
         movss xmm0, [f_01]
+        addss xmm0, [ball_ray]
         movss [ball_y], xmm0
         movss xmm0, [f_05]
         movss [ball_dx], xmm0
@@ -754,14 +757,22 @@ static poll_messages:function
 
         ucomiss xmm12, [f_0]
         ja .bricks_collision ; skip pad collision if going up
-        ucomiss xmm7, xmm6 ; ball_y_bottom <= pad_y_top
+        ucomiss xmm7, xmm6 ; ball_y_bottom > pad_y_top
         ja .bricks_collision
-        ucomiss xmm7, xmm13 ; ball_y_bottom <= pad_y_center (to fix)
+        ucomiss xmm7, xmm13 ; ball_y_bottom < pad_y_center
         jb .bricks_collision
-        ucomiss xmm0, xmm5 ; 
+        ucomiss xmm0, xmm5
         jb .bricks_collision
         ucomiss xmm0, xmm9
         jb .inverty
+        ;jae .bricks_collision
+        ;; calculate angle
+        ;movss xmm12, [pad_x]
+        ;subss xmm12, [ball_x]
+        ;divss xmm9, [f_2] ; half pad width
+        ;divss xmm12, xmm9
+        ;; abs (set sign bit to 0)
+        ;andps xmm12, [sign_bit_mask]
 
         .bricks_collision:
         ; find out if colliding with any row
@@ -782,6 +793,7 @@ static poll_messages:function
         ; collision on blue row
         lea rdi, [blue_bricks]
         call collide_row
+        jmp .walls_collision
 
         .green:
         movss xmm11, [bricks_height]
@@ -794,6 +806,7 @@ static poll_messages:function
         ; collision on green row
         lea rdi, [green_bricks]
         call collide_row
+        jmp .walls_collision
 
         .yellow:
         movss xmm15, [yellow_bricks_y]
@@ -805,6 +818,7 @@ static poll_messages:function
         ; collision on yellow row
         lea rdi, [yellow_bricks]
         call collide_row
+        jmp .walls_collision
 
         .orange:
         movss xmm15, [orange_bricks_y]
@@ -816,6 +830,7 @@ static poll_messages:function
         ; collision on orange row
         lea rdi, [orange_bricks]
         call collide_row
+        jmp .walls_collision
 
         .red:
         movss xmm15, [red_bricks_y]
@@ -911,6 +926,16 @@ static poll_messages:function
         mov dword [rsp], WINDOW_SIZE
         call x11_put_image_ext
         add rsp, 16
+
+        ; cap fps (wrong)
+        ;movd xmm0, [rsp + 60] ; deltatime in seconds
+        ;cvtss2sd xmm0, xmm0
+        ;movsd xmm1, [ms_33]
+        ;ucomiss xmm1, xmm0
+        ;jae .loop ; if deltatime > minimum frametime
+        ;subsd xmm1, xmm0 ; duration in seconds
+        ;movsd xmm0, xmm1
+        ;call nanosleep
 
         jmp .loop
 
@@ -1291,14 +1316,14 @@ ball_fragment_square:
     mov eax, BALL_COLOR
     jmp .done
     .black:
-    mov eax, 0
+    mov eax, BACKGROUND_COLOR
     .done:
     ret
 
 ; @param xmm0: x coord (normalized)
 ; @param xmm1: y coord (normalized)
 ; @return eax: rgb color
-ball_fragment_round:
+ball_fragment_circle:
     movss xmm2, [ball_x]
     movss xmm3, [ball_y]
     movss xmm4, [ball_ray]
@@ -1315,7 +1340,7 @@ ball_fragment_round:
     mov eax, BALL_COLOR
     jmp .done
     .black:
-    mov eax, 0
+    mov eax, BACKGROUND_COLOR
     .done:
     ret
 
@@ -1344,7 +1369,7 @@ pad_fragment:
     mov eax, PAD_COLOR
     jmp .done
     .black:
-    mov eax, 0
+    mov eax, BACKGROUND_COLOR
     .done:
     ret
 
@@ -1458,7 +1483,7 @@ bricks_fragment:
     mov eax, BORDER_BRICKS_COLOR
     jmp .done
     .black:
-    mov eax, 0
+    mov eax, BACKGROUND_COLOR
     .done:
     ret
 
@@ -1505,6 +1530,9 @@ collide_row:
     subss xmm5, [f_1] ; floor
     .check_coll:
     ; xmm5 has index of leftmost brick colliding
+
+    ; find closest brick (it's the one with biggest width, since we are checking row by row)
+    ; loop and choose max width brick
 
     cvtss2si rcx, xmm5
     mov [rsp + 16], rcx
@@ -1608,12 +1636,15 @@ collide_row:
     jmp .collide_right
 
     .collide_up:
+    lea rdi, [up]
+    call println
     movss xmm13, [f_0]
     movss xmm11, [rsp + 4] ; bricks height
     movss xmm14, [rsp] ; top_brick_y
     ; reposition
     movss xmm5, [ball_ray]
     addss xmm5, xmm14 ; ball_y = top_brick_y + half_ball_height
+    addss xmm5, [f_0000001] 
     movss [ball_y], xmm5
     ; change velocity
     movss xmm15, [ball_dy]
@@ -1622,6 +1653,8 @@ collide_row:
     jmp .inverty
 
     .collide_down:
+    lea rdi, [down]
+    call println
     movss xmm13, [f_0]
     movss xmm11, [rsp + 4] ; bricks height
     movss xmm14, [rsp] ; top_brick_y
@@ -1629,6 +1662,7 @@ collide_row:
     movss xmm5, [ball_ray]
     subss xmm14, xmm11
     subss xmm14, xmm5 ; ball_y = top_brick_y - brick_height - half_ball_height
+    subss xmm14, [f_0000001] 
     movss [ball_y], xmm14
     ; change velocity
     movss xmm15, [ball_dy]
@@ -1637,11 +1671,14 @@ collide_row:
     jmp .inverty
 
     .collide_left:
+    lea rdi, [left]
+    call println
     movss xmm13, [f_0]
     movss xmm14, [rsp + 24] ; left_brick_x
     ; reposition
     movss xmm5, [ball_ray]
     subss xmm14, xmm5 ; ball_x = left_brick_x - ball_ray
+    subss xmm14, [f_0000001] 
     movss [ball_x], xmm14
     ; change velocity
     movss xmm15, [ball_dx]
@@ -1650,11 +1687,14 @@ collide_row:
     jmp .invertx
 
     .collide_right:
+    lea rdi, [right]
+    call println
     movss xmm13, [f_0]
     movss xmm14, [rsp + 28] ; right_brick_x
     ; reposition
     movss xmm5, [ball_ray]
     addss xmm5, xmm14 ; ball_x = right_brick_x + ball_ray
+    addss xmm5, [f_0000001] 
     movss [ball_x], xmm5
     ; change velocity
     movss xmm15, [ball_dx]
@@ -1723,21 +1763,21 @@ render_game:
     movss xmm0, xmm2 ; u
     movss xmm1, xmm3 ; v
     call ball_fragment_square
-    cmp eax, 0
+    cmp eax, BACKGROUND_COLOR
     jne .color
 
     ; render pad
     movss xmm0, [rsp + 8] ; u
     movss xmm1, [rsp + 12] ; v
     call pad_fragment
-    cmp eax, 0
+    cmp eax, BACKGROUND_COLOR
     jne .color
 
     ; render bricks
     movss xmm0, [rsp + 8]
     movss xmm1, [rsp + 12]
     call bricks_fragment
-    cmp eax, 0
+    cmp eax, BACKGROUND_COLOR
     jne .color
 
     .color:
@@ -1764,6 +1804,18 @@ render_game:
     pop rbp
     ret
 
+; @param xmm0: number of seconds to sleep for
+nanosleep:
+    ; convert xmm0 to seconds (0) and nanoseconds
+    mulsd xmm0, [one_billion] ; nanoseconds
+    cvtsd2si rcx, xmm0
+    mov qword [timespec + 8], rcx
+    xor rcx, rcx
+    mov qword [timespec], rcx
+    mov rax, SYS_NANOSLEEP
+    lea rdi, [timespec]
+    syscall
+    ret
 
 ; updates [cur_time] with the current time
 update_current_time:
@@ -1917,17 +1969,17 @@ id_mask: dd 0
 root_visual_id: dd 0
 
 ; ball
-ball_ray: dd 0.012
+ball_ray: dd 0.008
 ball_min: equ ball_ray
-ball_max: dd 0.988 ; 1 - ball_ray
-ball_x: dd 0.05
+ball_max: dd 0.992 ; 1 - ball_ray
+ball_x: dd 0.5
 ball_y: dd 0.8
 ball_dx: dd 0.5
 ball_dy: dd 0.5
 
 ; pad
 pad_x: dd 0.5
-pad_dx: dd 1.0
+pad_dx: dd 1.5
 pad_y: dd 0.1
 pad_width: dd 0.15
 pad_height: dd 0.025
@@ -1946,6 +1998,7 @@ bricks_border: dd 0.0024
 ; fp values
 f_255: dd 255.0 
 f_1: dd 1.0
+f_2: dd 2.0
 f_0: dd 0.0
 f_0000001: dd 0.000001
 f_05: dd 0.5
@@ -1953,10 +2006,13 @@ f_neg_1: dd -1.0
 f_005: dd 0.05
 f_01: dd 0.1
 d_0: dq 0.0
+sign_bit_mask: dd 0x7FFFFFFF
 
 cur_time: dq 0.0
 prev_time: dq 0.0
 one_billion: dq 1000000000.0 
+ms_16: dq 0.016
+ms_33: dq 0.033
 
 you_won: db "YOU WON!", 0
 game_over: db "GAME OVER", 0
