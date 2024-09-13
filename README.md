@@ -1,8 +1,11 @@
-# pong-asm
+# breakout-asm
 
-Pong in x86-64 assembly.
-Doesn't depend on libc or Xlib.
+A Breakout game implemented in x64 assembly using the nasm assembler.
+Doesn't rely on libc, Xlib, or any other libraries. The game communicates directly with the X server via sockets.
+It *should* work on any Linux system running X11, but I have tested it only on my machine.
+
+![](https://imgur.com/a/flTRdlq)
 
 ## References
 
-* https://gaultier.github.io/blog/x11_x64.html
+* https://gaultier.github.io/blog/x11_x64.html for setting up the communication with X11

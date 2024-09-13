@@ -1,5 +1,5 @@
-pong: pong.o
-	ld -o pong pong.o
+breakout: breakout.o
+	ld -s -o breakout breakout.o
 
-pong.o: pong.asm
-	nasm -felf64 -g -F dwarf pong.asm
+breakout.o: breakout.asm
+	nasm -felf64 breakout.asm

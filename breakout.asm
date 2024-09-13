@@ -1636,8 +1636,6 @@ collide_row:
     jmp .collide_right
 
     .collide_up:
-    lea rdi, [up]
-    call println
     movss xmm13, [f_0]
     movss xmm11, [rsp + 4] ; bricks height
     movss xmm14, [rsp] ; top_brick_y
@@ -1653,8 +1651,6 @@ collide_row:
     jmp .inverty
 
     .collide_down:
-    lea rdi, [down]
-    call println
     movss xmm13, [f_0]
     movss xmm11, [rsp + 4] ; bricks height
     movss xmm14, [rsp] ; top_brick_y
@@ -1671,8 +1667,6 @@ collide_row:
     jmp .inverty
 
     .collide_left:
-    lea rdi, [left]
-    call println
     movss xmm13, [f_0]
     movss xmm14, [rsp + 24] ; left_brick_x
     ; reposition
@@ -1687,8 +1681,6 @@ collide_row:
     jmp .invertx
 
     .collide_right:
-    lea rdi, [right]
-    call println
     movss xmm13, [f_0]
     movss xmm14, [rsp + 28] ; right_brick_x
     ; reposition
@@ -1973,7 +1965,7 @@ ball_ray: dd 0.008
 ball_min: equ ball_ray
 ball_max: dd 0.992 ; 1 - ball_ray
 ball_x: dd 0.5
-ball_y: dd 0.8
+ball_y: dd 0.2
 ball_dx: dd 0.5
 ball_dy: dd 0.5
 
